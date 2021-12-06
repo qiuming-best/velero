@@ -43,7 +43,7 @@ type LabelSelector struct {
 
 var BackupWithLabelSelector func() = TestFunc(&LabelSelector{testInBackup})
 
-func (l *LabelSelector) Init() {
+func (l *LabelSelector) Init() error {
 	rand.Seed(time.Now().UnixNano())
 	UUIDgen, _ = uuid.NewRandom()
 	l.FilteringCase.Init()
@@ -69,6 +69,7 @@ func (l *LabelSelector) Init() {
 		"create", "--namespace", VeleroCfg.VeleroNamespace, "restore", l.RestoreName,
 		"--from-backup", l.BackupName, "--wait",
 	}
+	return nil
 }
 
 func (l *LabelSelector) CreateResources() error {

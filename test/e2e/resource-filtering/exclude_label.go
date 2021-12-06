@@ -42,7 +42,7 @@ type ExcludeFromBackup struct {
 
 var ExcludeFromBackupTest func() = TestFunc(&ExcludeFromBackup{testInBackup})
 
-func (e *ExcludeFromBackup) Init() {
+func (e *ExcludeFromBackup) Init() error {
 	rand.Seed(time.Now().UnixNano())
 	UUIDgen, _ = uuid.NewRandom()
 	e.FilteringCase.Init()
@@ -67,6 +67,7 @@ func (e *ExcludeFromBackup) Init() {
 		"create", "--namespace", VeleroCfg.VeleroNamespace, "restore", e.RestoreName,
 		"--from-backup", e.BackupName, "--wait",
 	}
+	return nil
 }
 
 func (e *ExcludeFromBackup) CreateResources() error {
