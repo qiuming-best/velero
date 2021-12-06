@@ -66,6 +66,7 @@ var _ = Describe("[Basic][Restic] Velero tests on cluster using the plugin provi
 var _ = Describe("[Basic][APIGroup] Velero tests with various CRD API group versions", APIGropuVersionsTest)
 var _ = Describe("[Basic][Snapshot] Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups", BackupRestoreWithSnapshots)
 var _ = Describe("[Basic][MultiNamespaces] Backup/restore of 2 namespaces", BasicBackupRestore)
+var _ = Describe("[Basic][Annotation] Backup/restore of namespace annotation test", NamespaceAnnotationTest)
 
 /*** Scale E2E Test ***/
 var _ = Describe("[Scale][MultiNamespaces] Backup/restore of 2500 namespaces", MultiNSBackupRestore)
