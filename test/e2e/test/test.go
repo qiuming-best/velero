@@ -75,7 +75,8 @@ func TestFunc(test VeleroBackupRestoreTest) func() {
 		var err error
 		TestClientInstance, err = NewTestClient()
 		Expect(err).To(Succeed(), "Failed to instantiate cluster client for backup tests")
-		test.Init()
+		err = test.Init()
+		Expect(err).To(Succeed(), "Failed to instantiate test cases")
 		BeforeEach(func() {
 			flag.Parse()
 			if VeleroCfg.InstallVelero && !isVeleroInstalled {
@@ -91,7 +92,8 @@ func TestFunc(test VeleroBackupRestoreTest) func() {
 	}
 }
 
-func (t *TestCase) Init() {
+func (t *TestCase) Init() error {
+	return nil
 }
 
 func (t *TestCase) CreateResources() error {
