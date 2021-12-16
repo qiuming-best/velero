@@ -92,6 +92,35 @@ func TestFunc(test VeleroBackupRestoreTest) func() {
 	}
 }
 
+func TestFuncWithMultiIt(tests []VeleroBackupRestoreTest) func() {
+	return func() {
+		var err error
+		TestClientInstance, err = NewTestClient()
+		Expect(err).To(Succeed(), "Failed to instantiate cluster client for backup tests")
+		for k := range tests {
+			Expect(tests[k].Init()).To(Succeed(), fmt.Sprintf("Failed to instantiate test %s case", tests[k].GetTestMsg().Desc))
+		}
+
+		BeforeEach(func() {
+			flag.Parse()
+			if VeleroCfg.InstallVelero {
+				Expect(VeleroInstall(context.Background(), &VeleroCfg, "", false)).To(Succeed())
+			}
+		})
+		AfterEach(func() {
+			if VeleroCfg.InstallVelero {
+				Expect(VeleroUninstall(context.Background(), VeleroCfg.VeleroCLI, VeleroCfg.VeleroNamespace)).To((Succeed()))
+			}
+		})
+		for k := range tests {
+			curTest := tests[k]
+			It(curTest.GetTestMsg().Text, func() {
+				Expect(RunTestCase(curTest)).To(Succeed(), curTest.GetTestMsg().FailedMSG)
+			})
+		}
+	}
+}
+
 func (t *TestCase) Init() error {
 	return nil
 }
