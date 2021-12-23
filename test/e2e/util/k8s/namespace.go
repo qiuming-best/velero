@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -93,15 +94,41 @@ func CleanupNamespacesWithPoll(ctx context.Context, client TestClient, nsBaseNam
 	if err != nil {
 		return errors.Wrap(err, "Could not retrieve namespaces")
 	}
-	for _, checkNamespace := range namespaces.Items {
-		if strings.HasPrefix(checkNamespace.Name, nsBaseName) {
-			err := DeleteNamespace(ctx, client, checkNamespace.Name, true)
-			if err != nil {
-				return errors.Wrapf(err, "Could not delete namespace %s", checkNamespace.Name)
-			}
+
+	errChan := make(chan error)
+	defer close(errChan)
+	wg := sync.WaitGroup{}
+	waitCh := make(chan struct{})
+	wg.Add(len(namespaces.Items))
+	go func() {
+		for _, checkNamespace := range namespaces.Items {
+			go func(checkNS corev1api.Namespace) {
+				defer wg.Done()
+				if strings.HasPrefix(checkNS.Name, nsBaseName) {
+					err := DeleteNamespace(ctx, client, checkNS.Name, true)
+					if err != nil {
+						errChan <- errors.Wrapf(err, "Could not delete namespace %s", checkNS.Name)
+					}
+				}
+			}(checkNamespace)
 		}
+		wg.Wait()
+		close(waitCh)
+	}()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return errors.New("faild to get context deadline when clean up namespaces")
 	}
-	return nil
+
+	select {
+	case err := <-errChan:
+		return err
+	case <-time.After(time.Since(deadline)):
+		return errors.New("faild to clean up namespaces with timeout")
+	case <-waitCh:
+		return nil
+	}
 }
 
 func CleanupNamespaces(ctx context.Context, client TestClient, nsBaseName string) error {
