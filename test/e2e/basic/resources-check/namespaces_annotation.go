@@ -78,7 +78,7 @@ func (n *NSAnnotationCase) CreateResources() error {
 	return nil
 }
 
-func (n NSAnnotationCase) Verify() error {
+func (n *NSAnnotationCase) Verify() error {
 	for nsNum := 0; nsNum < n.NamespacesTotal; nsNum++ {
 		checkNSName := fmt.Sprintf("%s-%00000d", n.NSBaseName, nsNum)
 		checkAnnoName := fmt.Sprintf("annotation-%s-%00000d", n.NSBaseName, nsNum)
