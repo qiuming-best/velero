@@ -124,7 +124,7 @@ func CleanupNamespacesWithPoll(ctx context.Context, client TestClient, nsBaseNam
 	select {
 	case err := <-errChan:
 		return err
-	case <-time.After(time.Since(deadline)):
+	case <-time.After(time.Until(deadline)):
 		return errors.New("faild to clean up namespaces with timeout")
 	case <-waitCh:
 		return nil
