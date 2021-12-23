@@ -61,14 +61,14 @@ func (m *MultiNSBackup) Init() error {
 
 	if m.IsScalTest {
 		m.NamespacesTotal = 2500
-		m.TimeoutDuration = time.Hour * 2
+		m.TimeoutDuration = time.Hour * 3
 		m.TestMsg = &TestMSG{
 			Text:      "When I create 2500 namespaces should be successfully backed up and restored",
 			FailedMSG: "Failed to successfully backup and restore multiple namespaces",
 		}
 	} else {
 		m.NamespacesTotal = 2
-		m.TimeoutDuration = time.Minute * 5
+		m.TimeoutDuration = time.Minute * 10
 		m.TestMsg = &TestMSG{
 			Text:      "When I create 2 namespaces should be successfully backed up and restored",
 			FailedMSG: "Failed to successfully backup and restore multiple namespaces",
@@ -94,6 +94,7 @@ func (m *MultiNSBackup) CreateResources() error {
 	fmt.Printf("Creating namespaces ...\n")
 	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
 		createNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+		fmt.Printf("Creating %d %s namespaces ...\n", nsNum, createNSName)
 		if err := CreateNamespace(m.Ctx, m.Client, createNSName); err != nil {
 			return errors.Wrapf(err, "Failed to create namespace %s", createNSName)
 		}
@@ -105,6 +106,7 @@ func (m *MultiNSBackup) Verify() error {
 	// Verify that we got back all of the namespaces we created
 	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
 		checkNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+		fmt.Printf("Verifying %d %s namespaces ...\n", nsNum, checkNSName)
 		checkNS, err := GetNamespace(m.Ctx, m.Client, checkNSName)
 		if err != nil {
 			return errors.Wrapf(err, "Could not retrieve test namespace %s", checkNSName)

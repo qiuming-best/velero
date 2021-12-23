@@ -68,7 +68,7 @@ var _ = Describe("[Restic] Velero tests on cluster using the plugin provider for
 
 var _ = Describe("[Snapshot] Velero tests on cluster using the plugin provider for object storage and snapshots for volume backups", BackupRestoreWithSnapshots)
 
-var _ = Describe("[Basic] Backup/restore of cluster resources", ResourcesCheckTest)
+var _ = Describe("[Scale] Backup/restore of cluster resources", ResourcesCheckTest)
 
 var _ = Describe("[Scale] Backup/restore of 2500 namespaces", MultiNSBackupRestore)
 
