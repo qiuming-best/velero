@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -92,14 +93,46 @@ func (m *MultiNSBackup) Init() error {
 func (m *MultiNSBackup) CreateResources() error {
 	m.Ctx, _ = context.WithTimeout(context.Background(), m.TimeoutDuration)
 	fmt.Printf("Creating namespaces ...\n")
-	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
-		createNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
-		fmt.Printf("Creating %d %s namespaces ...\n", nsNum, createNSName)
-		if err := CreateNamespace(m.Ctx, m.Client, createNSName); err != nil {
-			return errors.Wrapf(err, "Failed to create namespace %s", createNSName)
+	wg := sync.WaitGroup{}
+	concurrency := 100
+	waitCh := make(chan struct{})
+	errChan := make(chan error, concurrency)
+	defer close(errChan)
+	go func() {
+		for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
+			createNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+			fmt.Printf("Creating %d %s namespaces ...\n", nsNum, createNSName)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var err error
+				if err = CreateNamespace(m.Ctx, m.Client, createNSName); err != nil {
+					err = errors.Wrapf(err, "Failed to create namespace %s", createNSName)
+				}
+				errChan <- err
+			}()
+		}
+		wg.Wait()
+		close(waitCh)
+	}()
+
+	deadline, ok := m.Ctx.Deadline()
+	if !ok {
+		return errors.New("faild to get context deadline when create namespaces")
+	}
+
+	for {
+		select {
+		case err := <-errChan:
+			if err != nil {
+				return err
+			}
+		case <-time.After(time.Until(deadline)):
+			return errors.New("faild to create namespaces with timeout")
+		case <-waitCh:
+			return nil
 		}
 	}
-	return nil
 }
 
 func (m *MultiNSBackup) Verify() error {
