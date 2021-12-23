@@ -96,7 +96,7 @@ func CleanupNamespacesWithPoll(ctx context.Context, client TestClient, nsBaseNam
 	}
 
 	wg := sync.WaitGroup{}
-	concurrency := 100
+	concurrency := 10
 	waitCh := make(chan struct{})
 	errChan := make(chan error, concurrency)
 	defer close(errChan)

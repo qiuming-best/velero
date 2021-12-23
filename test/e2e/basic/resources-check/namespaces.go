@@ -94,7 +94,7 @@ func (m *MultiNSBackup) CreateResources() error {
 	m.Ctx, _ = context.WithTimeout(context.Background(), m.TimeoutDuration)
 	fmt.Printf("Creating namespaces ...\n")
 	wg := sync.WaitGroup{}
-	concurrency := 100
+	concurrency := 10
 	waitCh := make(chan struct{})
 	errChan := make(chan error, concurrency)
 	defer close(errChan)
@@ -137,16 +137,46 @@ func (m *MultiNSBackup) CreateResources() error {
 
 func (m *MultiNSBackup) Verify() error {
 	// Verify that we got back all of the namespaces we created
-	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
-		checkNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
-		fmt.Printf("Verifying %d %s namespaces ...\n", nsNum, checkNSName)
-		checkNS, err := GetNamespace(m.Ctx, m.Client, checkNSName)
-		if err != nil {
-			return errors.Wrapf(err, "Could not retrieve test namespace %s", checkNSName)
+	wg := sync.WaitGroup{}
+	concurrency := 10
+	waitCh := make(chan struct{})
+	errChan := make(chan error, concurrency)
+	defer close(errChan)
+	go func() {
+		for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
+			checkNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				var err error
+				checkNS, err := GetNamespace(m.Ctx, m.Client, checkNSName)
+				if err != nil {
+					err = errors.Wrapf(err, "Could not retrieve test namespace %s", checkNSName)
+				} else if checkNS.Name != checkNSName {
+					err = errors.Errorf("Retrieved namespace for %s has name %s instead", checkNSName, checkNS.Name)
+				}
+				errChan <- err
+			}()
 		}
-		if checkNS.Name != checkNSName {
-			return errors.Errorf("Retrieved namespace for %s has name %s instead", checkNSName, checkNS.Name)
+		wg.Wait()
+		close(waitCh)
+	}()
+
+	deadline, ok := m.Ctx.Deadline()
+	if !ok {
+		return errors.New("faild to get context deadline when verify namespaces")
+	}
+
+	for {
+		select {
+		case err := <-errChan:
+			if err != nil {
+				return err
+			}
+		case <-time.After(time.Until(deadline)):
+			return errors.New("faild to verify namespaces with timeout")
+		case <-waitCh:
+			return nil
 		}
 	}
-	return nil
 }
