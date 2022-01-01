@@ -152,3 +152,20 @@ func CleanupNamespaces(ctx context.Context, client TestClient, nsBaseName string
 	}
 	return nil
 }
+
+func WaitAllNamespacesDeleted(ctx context.Context, client TestClient, label string) error {
+	var ns *corev1api.NamespaceList
+	var err error
+	return waitutil.PollImmediateInfinite(5*time.Second,
+		func() (bool, error) {
+			if ns, err = client.ClientGo.CoreV1().Namespaces().List(ctx, v1.ListOptions{LabelSelector: label}); err != nil {
+				return false, err
+			} else if ns == nil {
+				return true, nil
+			} else if len(ns.Items) == 0 {
+				return true, nil
+			}
+			fmt.Printf("%d namespaces is still being deleted...\n", len(ns.Items))
+			return false, nil
+		})
+}

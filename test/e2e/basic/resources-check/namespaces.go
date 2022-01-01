@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/rand"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -90,7 +89,7 @@ func (m *MultiNSBackup) Init() error {
 	return nil
 }
 
-func (m *MultiNSBackup) CreateResources() error {
+/*func (m *MultiNSBackup) CreateResources() error {
 	m.Ctx, _ = context.WithTimeout(context.Background(), m.TimeoutDuration)
 	fmt.Printf("Creating namespaces ...\n")
 	wg := sync.WaitGroup{}
@@ -98,6 +97,9 @@ func (m *MultiNSBackup) CreateResources() error {
 	waitCh := make(chan struct{})
 	errChan := make(chan error, concurrency)
 	defer close(errChan)
+	labels := map[string]string{
+		"ns-test": "true",
+	}
 	go func() {
 		for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
 			createNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
@@ -106,7 +108,7 @@ func (m *MultiNSBackup) CreateResources() error {
 			go func() {
 				defer wg.Done()
 				var err error
-				if err = CreateNamespace(m.Ctx, m.Client, createNSName); err != nil {
+				if err = CreateNamespaceWithLabel(m.Ctx, m.Client, createNSName, labels); err != nil {
 					err = errors.Wrapf(err, "Failed to create namespace %s", createNSName)
 				}
 				errChan <- err
@@ -133,9 +135,40 @@ func (m *MultiNSBackup) CreateResources() error {
 			return nil
 		}
 	}
+}*/
+
+func (m *MultiNSBackup) CreateResources() error {
+	m.Ctx, _ = context.WithTimeout(context.Background(), m.TimeoutDuration)
+	labels := map[string]string{
+		"ns-test": "true",
+	}
+	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
+		createNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+		fmt.Printf("Creating %d %s namespaces ...\n", nsNum, createNSName)
+
+		if err := CreateNamespaceWithLabel(m.Ctx, m.Client, createNSName, labels); err != nil {
+			return errors.Wrapf(err, "Failed to create namespace %s", createNSName)
+		}
+	}
+	return nil
 }
 
 func (m *MultiNSBackup) Verify() error {
+	// Verify that we got back all of the namespaces we created
+	for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
+		checkNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
+		checkNS, err := GetNamespace(m.Ctx, m.Client, checkNSName)
+		fmt.Printf("Verify %d %s namespaces ...\n", nsNum, checkNSName)
+		if err != nil {
+			return errors.Wrapf(err, "Could not retrieve test namespace %s", checkNSName)
+		} else if checkNS.Name != checkNSName {
+			return errors.Errorf("Retrieved namespace for %s has name %s instead", checkNSName, checkNS.Name)
+		}
+	}
+	return nil
+}
+
+/*func (m *MultiNSBackup) Verify() error {
 	// Verify that we got back all of the namespaces we created
 	wg := sync.WaitGroup{}
 	concurrency := 10
@@ -146,17 +179,19 @@ func (m *MultiNSBackup) Verify() error {
 		for nsNum := 0; nsNum < m.NamespacesTotal; nsNum++ {
 			checkNSName := fmt.Sprintf("%s-%00000d", m.NSBaseName, nsNum)
 			wg.Add(1)
-			go func() {
+			go func(n int) {
 				defer wg.Done()
 				var err error
+				time.Sleep(time.Millisecond * 100)
 				checkNS, err := GetNamespace(m.Ctx, m.Client, checkNSName)
+				fmt.Printf("Verify %d %s namespaces ...\n", n, checkNSName)
 				if err != nil {
 					err = errors.Wrapf(err, "Could not retrieve test namespace %s", checkNSName)
 				} else if checkNS.Name != checkNSName {
 					err = errors.Errorf("Retrieved namespace for %s has name %s instead", checkNSName, checkNS.Name)
 				}
 				errChan <- err
-			}()
+			}(nsNum)
 		}
 		wg.Wait()
 		close(waitCh)
@@ -179,4 +214,12 @@ func (m *MultiNSBackup) Verify() error {
 			return nil
 		}
 	}
+}*/
+
+func (m *MultiNSBackup) Destroy() error {
+	err := CleanupNamespaces(m.Ctx, m.Client, m.NSBaseName)
+	if err != nil {
+		return errors.Wrap(err, "Could cleanup retrieve namespaces")
+	}
+	return WaitAllNamespacesDeleted(m.Ctx, m.Client, "ns-test=true")
 }
