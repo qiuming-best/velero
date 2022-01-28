@@ -46,7 +46,7 @@ func (m *MultiNSBackup) Init() error {
 	m.RestoreName = "restore-" + UUIDgen.String()
 	m.NSBaseName = "nstest-" + UUIDgen.String()
 	m.Client = TestClientInstance
-	m.NSExcluded = &[]string{}
+	m.NSExcluded = &[]string{"velero"}
 
 	// Currently it's hard to build a large list of namespaces to include and wildcards do not work so instead
 	// we will exclude all of the namespaces that existed prior to the test from the backup
