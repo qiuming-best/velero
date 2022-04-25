@@ -64,9 +64,16 @@ type ResticRepositoryStatus struct {
 	LastMaintenanceTime *metav1.Time `json:"lastMaintenanceTime,omitempty"`
 }
 
+// TODO(2.0) After converting all resources to use the runtime-controller client,
+// the genclient and k8s:deepcopy markers will no longer be needed and should be removed.
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-
+// +kubebuilder:object:root=true
+// +kubebuilder:object:generate=true
+// +kubebuilder:storageversion
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".metadata.name",description="Name of the restic repo"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 type ResticRepository struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -80,7 +87,10 @@ type ResticRepository struct {
 	Status ResticRepositoryStatus `json:"status,omitempty"`
 }
 
+// TODO(2.0) After converting all resources to use the runtime-controller client,
+// the k8s:deepcopy marker will no longer be needed and should be removed.
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:root=true
 
 // ResticRepositoryList is a list of ResticRepositories.
 type ResticRepositoryList struct {

@@ -736,29 +736,12 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		}
 	}
 
-	resticRepoControllerRunInfo := func() controllerRunInfo {
-		resticRepoController := controller.NewResticRepositoryController(
-			s.logger,
-			s.sharedInformerFactory.Velero().V1().ResticRepositories(),
-			s.veleroClient.VeleroV1(),
-			s.mgr.GetClient(),
-			s.resticManager,
-			s.config.defaultResticMaintenanceFrequency,
-		)
-
-		return controllerRunInfo{
-			controller: resticRepoController,
-			numWorkers: defaultControllerWorkers,
-		}
-	}
-
 	enabledControllers := map[string]func() controllerRunInfo{
 		controller.BackupSync:        backupSyncControllerRunInfo,
 		controller.Backup:            backupControllerRunInfo,
 		controller.GarbageCollection: gcControllerRunInfo,
 		controller.BackupDeletion:    deletionControllerRunInfo,
 		controller.Restore:           restoreControllerRunInfo,
-		controller.ResticRepo:        resticRepoControllerRunInfo,
 	}
 	// Note: all runtime type controllers that can be disabled are grouped separately, below:
 	enabledRuntimeControllers := make(map[string]struct{})
@@ -828,6 +811,10 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 
 	if err := controller.NewScheduleReconciler(s.namespace, s.logger, s.mgr.GetClient(), s.metrics).SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", controller.Schedule)
+	}
+
+	if err := controller.NewResticRepoConciler(s.namespace, s.logger, s.mgr.GetClient(), s.config.defaultResticMaintenanceFrequency, s.resticManager).SetupWithManager(s.mgr); err != nil {
+		s.logger.Fatal(err, "unable to create controller", "controller", controller.ResticRepo)
 	}
 
 	if _, ok := enabledRuntimeControllers[controller.ServerStatusRequest]; ok {
