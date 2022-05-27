@@ -28,7 +28,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 )
 
 func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
@@ -69,7 +69,7 @@ func NewDescribeCommand(f client.Factory, use string) *cobra.Command {
 
 			first := true
 			for _, restore := range restores.Items {
-				opts := restic.NewPodVolumeRestoreListOptions(restore.Name)
+				opts := uploader.NewPodVolumeRestoreListOptions(restore.Name)
 				podvolumeRestoreList, err := veleroClient.VeleroV1().PodVolumeRestores(f.Namespace()).List(context.TODO(), opts)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "error getting PodVolumeRestores for restore %s: %v\n", restore.Name, err)

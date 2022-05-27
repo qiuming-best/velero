@@ -57,6 +57,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
+	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 
 	"github.com/vmware-tanzu/velero/pkg/controller"
 	velerodiscovery "github.com/vmware-tanzu/velero/pkg/discovery"
@@ -67,7 +69,6 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/podexec"
-	"github.com/vmware-tanzu/velero/pkg/restic"
 	"github.com/vmware-tanzu/velero/pkg/restore"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
@@ -121,8 +122,10 @@ type serverConfig struct {
 	profilerAddress                                                         string
 	formatFlag                                                              *logging.FormatFlag
 	defaultResticMaintenanceFrequency                                       time.Duration
+	defaultQuickMaintenanceFrequency                                        time.Duration
 	garbageCollectionFrequency                                              time.Duration
 	defaultVolumesToRestic                                                  bool
+	legacyRepo                                                              bool
 }
 
 type controllerRunInfo struct {
@@ -150,8 +153,10 @@ func NewCommand(f client.Factory) *cobra.Command {
 			profilerAddress:                   defaultProfilerAddress,
 			resourceTerminatingTimeout:        defaultResourceTerminatingTimeout,
 			formatFlag:                        logging.NewFormatFlag(),
-			defaultResticMaintenanceFrequency: restic.DefaultMaintenanceFrequency,
-			defaultVolumesToRestic:            restic.DefaultVolumesToRestic,
+			defaultResticMaintenanceFrequency: repository.DefaultMaintenanceFrequency,
+			defaultQuickMaintenanceFrequency:  repository.DefaultQuickMaintenanceFrequency,
+			defaultVolumesToRestic:            uploader.DefaultVolumesToRestic,
+			legacyRepo:                        uploader.DefaultToLegacyUploader,
 		}
 	)
 
@@ -217,6 +222,7 @@ func NewCommand(f client.Factory) *cobra.Command {
 	command.Flags().DurationVar(&config.defaultResticMaintenanceFrequency, "default-restic-prune-frequency", config.defaultResticMaintenanceFrequency, "How often 'restic prune' is run for restic repositories by default.")
 	command.Flags().DurationVar(&config.garbageCollectionFrequency, "garbage-collection-frequency", config.garbageCollectionFrequency, "How often garbage collection is run for expired backups.")
 	command.Flags().BoolVar(&config.defaultVolumesToRestic, "default-volumes-to-restic", config.defaultVolumesToRestic, "Backup all volumes with restic by default.")
+	command.Flags().BoolVar(&config.legacyRepo, "legacy-repo", true, "Use legacy Restic repository.")
 
 	return command
 }
@@ -238,7 +244,8 @@ type server struct {
 	logger                              logrus.FieldLogger
 	logLevel                            logrus.Level
 	pluginRegistry                      clientmgmt.Registry
-	resticManager                       restic.RepositoryManager
+	repositoryManager                   repository.RepositoryManager
+	podVolumeBackupMgr                  uploader.BackupRestoreManager
 	metrics                             *metrics.ServerMetrics
 	config                              serverConfig
 	mgr                                 manager.Manager
@@ -259,6 +266,8 @@ func newServer(f client.Factory, config serverConfig, logger *logrus.Logger) (*s
 	if config.clientPageSize < 0 {
 		return nil, errors.New("client-page-size must not be negative")
 	}
+
+	logger.Debugf("Use Legacy Repo: %t", config.legacyRepo)
 
 	kubeClient, err := f.KubeClient()
 	if err != nil {
@@ -374,7 +383,11 @@ func (s *server) run() error {
 		return err
 	}
 
-	if err := s.initRestic(); err != nil {
+	if err := s.initRepository(); err != nil {
+		return err
+	}
+
+	if err := s.initPodVolumeBackup(); err != nil {
 		return err
 	}
 
@@ -507,35 +520,61 @@ var defaultRestorePriorities = []string{
 	"clusterresourcesets.addons.cluster.x-k8s.io",
 }
 
-func (s *server) initRestic() error {
+func (s *server) initRepository() error {
+	s.logger.Debug("initRepository")
+
+	// ensure the repo key secret is set up
+	if err := repository.EnsureCommonRepositoryKey(s.kubeClient.CoreV1(), s.namespace); err != nil {
+		return err
+	}
+
+	res, err := repository.NewRepositoryManager(
+		s.ctx,
+		s.namespace,
+		s.sharedInformerFactory.Velero().V1().ResticRepositories(),
+		s.veleroClient.VeleroV1(),
+		s.mgr.GetClient(),
+		s.credentialFileStore,
+		s.logger,
+		s.config.legacyRepo,
+	)
+	if err != nil {
+		return err
+	}
+	s.repositoryManager = res
+
+	return nil
+}
+
+func (s *server) initPodVolumeBackup() error {
+	s.logger.Debug("initPodVolumeBackup")
+
 	// warn if restic daemonset does not exist
-	if _, err := s.kubeClient.AppsV1().DaemonSets(s.namespace).Get(s.ctx, restic.DaemonSet, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	if _, err := s.kubeClient.AppsV1().DaemonSets(s.namespace).Get(s.ctx, uploader.DaemonSet, metav1.GetOptions{}); apierrors.IsNotFound(err) {
 		s.logger.Warn("Velero restic daemonset not found; restic backups/restores will not work until it's created")
 	} else if err != nil {
 		s.logger.WithError(errors.WithStack(err)).Warn("Error checking for existence of velero restic daemonset")
 	}
 
-	// ensure the repo key secret is set up
-	if err := restic.EnsureCommonRepositoryKey(s.kubeClient.CoreV1(), s.namespace); err != nil {
-		return err
-	}
-
-	res, err := restic.NewRepositoryManager(
+	mgr, err := uploader.NewPodVolumeBackupManager(
 		s.ctx,
 		s.namespace,
 		s.veleroClient,
-		s.sharedInformerFactory.Velero().V1().ResticRepositories(),
-		s.veleroClient.VeleroV1(),
-		s.mgr.GetClient(),
+		s.repositoryManager,
 		s.kubeClient.CoreV1(),
 		s.kubeClient.CoreV1(),
 		s.credentialFileStore,
 		s.logger,
 	)
+
 	if err != nil {
+		s.logger.WithError(errors.WithStack(err)).Warn("Failed to init pod volume backup manager")
 		return err
 	}
-	s.resticManager = res
+
+	s.podVolumeBackupMgr = mgr
+
+	s.logger.Debug("Pod volume backup manager is initialized")
 
 	return nil
 }
@@ -627,7 +666,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.discoveryHelper,
 			client.NewDynamicFactory(s.dynamicClient),
 			podexec.NewPodCommandExecutor(s.kubeClientConfig, s.kubeClient.CoreV1().RESTClient()),
-			s.resticManager,
+			s.podVolumeBackupMgr,
 			s.config.podVolumeOperationTimeout,
 			s.config.defaultVolumesToRestic,
 			s.config.clientPageSize,
@@ -687,7 +726,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			client.NewDynamicFactory(s.dynamicClient),
 			s.config.restoreResourcePriorities,
 			s.kubeClient.CoreV1().Namespaces(),
-			s.resticManager,
+			s.podVolumeBackupMgr,
 			s.config.podVolumeOperationTimeout,
 			s.config.resourceTerminatingTimeout,
 			s.logger,
@@ -795,7 +834,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		s.logger.Fatal(err, "unable to create controller", "controller", controller.Schedule)
 	}
 
-	if err := controller.NewResticRepoReconciler(s.namespace, s.logger, s.mgr.GetClient(), s.config.defaultResticMaintenanceFrequency, s.resticManager).SetupWithManager(s.mgr); err != nil {
+	if err := controller.NewResticRepoReconciler(s.namespace, s.logger, s.mgr.GetClient(), s.config.defaultResticMaintenanceFrequency, s.config.defaultQuickMaintenanceFrequency, s.config.legacyRepo, s.repositoryManager).SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", controller.ResticRepo)
 	}
 
@@ -803,7 +842,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 		s.logger,
 		s.mgr.GetClient(),
 		backupTracker,
-		s.resticManager,
+		s.repositoryManager,
 		s.metrics,
 		s.discoveryHelper,
 		newPluginManager,

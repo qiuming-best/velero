@@ -25,14 +25,15 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	resticmokes "github.com/vmware-tanzu/velero/pkg/restic/mocks"
+	repomokes "github.com/vmware-tanzu/velero/pkg/repository/mocks"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
 
 const defaultMaintenanceFrequency = 10 * time.Minute
+const defaultQuickMaintenanceFrequency = 5 * time.Minute
 
 func mockResticRepoReconciler(t *testing.T, rr *velerov1api.ResticRepository, mockOn string, arg interface{}, ret interface{}) *ResticRepoReconciler {
-	mgr := &resticmokes.RepositoryManager{}
+	mgr := &repomokes.RepositoryManager{}
 	if mockOn != "" {
 		mgr.On(mockOn, arg).Return(ret)
 	}
@@ -41,6 +42,8 @@ func mockResticRepoReconciler(t *testing.T, rr *velerov1api.ResticRepository, mo
 		velerotest.NewLogger(),
 		velerotest.NewFakeControllerRuntimeClient(t),
 		defaultMaintenanceFrequency,
+		defaultQuickMaintenanceFrequency,
+		false,
 		mgr,
 	)
 }

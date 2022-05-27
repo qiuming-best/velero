@@ -39,19 +39,22 @@ import (
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/boolptr"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
-func NewPodVolumeRestoreReconciler(logger logrus.FieldLogger, client client.Client, credentialsFileStore credentials.FileStore) *PodVolumeRestoreReconciler {
+func NewPodVolumeRestoreReconciler(ctx context.Context, logger logrus.FieldLogger, client client.Client, credentialsFileStore credentials.FileStore, legacyUploader bool) *PodVolumeRestoreReconciler {
 	return &PodVolumeRestoreReconciler{
 		Client:               client,
 		logger:               logger.WithField("controller", "PodVolumeRestore"),
 		credentialsFileStore: credentialsFileStore,
 		fileSystem:           filesystem.NewFileSystem(),
 		clock:                &clock.RealClock{},
+		ctx:                  ctx,
+		legacyUploader:       legacyUploader,
 	}
 }
 
@@ -61,6 +64,8 @@ type PodVolumeRestoreReconciler struct {
 	credentialsFileStore credentials.FileStore
 	fileSystem           filesystem.Interface
 	clock                clock.Clock
+	ctx                  context.Context
+	legacyUploader       bool
 }
 
 // +kubebuilder:rbac:groups=velero.io,resources=podvolumerestores,verbs=get;list;watch;create;update;patch;delete
@@ -97,7 +102,7 @@ func (c *PodVolumeRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	resticInitContainerIndex := getResticInitContainerIndex(pod)
 	if resticInitContainerIndex > 0 {
 		log.Warnf(`Init containers before the %s container may cause issues
-		          if they interfere with volumes being restored: %s index %d`, restic.InitContainer, restic.InitContainer, resticInitContainerIndex)
+		          if they interfere with volumes being restored: %s index %d`, uploader.InitContainer, uploader.InitContainer, resticInitContainerIndex)
 	}
 
 	log.Info("Restore starting")
@@ -220,7 +225,7 @@ func isResticInitContainerRunning(pod *corev1api.Pod) bool {
 func getResticInitContainerIndex(pod *corev1api.Pod) int {
 	// Restic wait container can be anywhere in the list of init containers so locate it.
 	for i, initContainer := range pod.Spec.InitContainers {
-		if initContainer.Name == restic.InitContainer {
+		if initContainer.Name == uploader.InitContainer {
 			return i
 		}
 	}
@@ -254,20 +259,6 @@ func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *ve
 		return errors.Wrap(err, "error identifying path of volume")
 	}
 
-	credsFile, err := c.credentialsFileStore.Path(restic.RepoKeySelector())
-	if err != nil {
-		return errors.Wrap(err, "error creating temp restic credentials file")
-	}
-	// ignore error since there's nothing we can do and it's a temp file.
-	defer os.Remove(credsFile)
-
-	resticCmd := restic.RestoreCommand(
-		req.Spec.RepoIdentifier,
-		credsFile,
-		req.Spec.SnapshotID,
-		volumePath,
-	)
-
 	backupLocation := &velerov1api.BackupStorageLocation{}
 	if err := c.Get(ctx, client.ObjectKey{
 		Namespace: req.Namespace,
@@ -276,38 +267,20 @@ func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *ve
 		return errors.Wrap(err, "error getting backup storage location")
 	}
 
-	// if there's a caCert on the ObjectStorage, write it to disk so that it can be passed to restic
-	var caCertFile string
-	if backupLocation.Spec.ObjectStorage != nil && backupLocation.Spec.ObjectStorage.CACert != nil {
-		caCertFile, err = restic.TempCACertFile(backupLocation.Spec.ObjectStorage.CACert, req.Spec.BackupStorageLocation, c.fileSystem)
-		if err != nil {
-			log.WithError(err).Error("Error creating temp cacert file")
-		}
-		// ignore error since there's nothing we can do and it's a temp file.
-		defer os.Remove(caCertFile)
-	}
-	resticCmd.CACertFile = caCertFile
-
-	env, err := restic.CmdEnv(backupLocation, c.credentialsFileStore)
+	var uploaderProv uploader.UploaderProvider
+	uploaderProv, err = uploader.NewUploaderProvider(
+		c.ctx, c.legacyUploader, req.Spec.RepoIdentifier, req.Namespace, backupLocation,
+		c.credentialsFileStore, repository.RepoKeySelector(), c.Client, "", log)
 	if err != nil {
-		return errors.Wrap(err, "error setting restic cmd env")
-	}
-	resticCmd.Env = env
-
-	// #4820: restrieve insecureSkipTLSVerify from BSL configuration for
-	// AWS plugin. If nothing is return, that means insecureSkipTLSVerify
-	// is not enable for Restic command.
-	skipTLSRet := restic.GetInsecureSkipTLSVerifyFromBSL(backupLocation, log)
-	if len(skipTLSRet) > 0 {
-		resticCmd.ExtraFlags = append(resticCmd.ExtraFlags, skipTLSRet)
+		return errors.Wrap(err, "error creating uploader")
 	}
 
 	var stdout, stderr string
 
-	if stdout, stderr, err = restic.RunRestore(resticCmd, log, c.updateRestoreProgressFunc(req, log)); err != nil {
-		return errors.Wrapf(err, "error running restic restore, cmd=%s, stdout=%s, stderr=%s", resticCmd.String(), stdout, stderr)
+	if stdout, stderr, err = uploaderProv.RunRestore(req.Spec.SnapshotID, volumePath, c.updateRestoreProgressFunc(req, log)); err != nil {
+		return errors.Wrapf(err, "error running restic restore, cmd=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
 	}
-	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", resticCmd.String(), stdout, stderr)
+	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
 
 	// Remove the .velero directory from the restored volume (it may contain done files from previous restores
 	// of this volume, which we don't want to carry over). If this fails for any reason, log and continue, since

@@ -48,10 +48,10 @@ import (
 	velerov1informers "github.com/vmware-tanzu/velero/pkg/generated/informers/externalversions"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/restic"
-	resticmocks "github.com/vmware-tanzu/velero/pkg/restic/mocks"
 	"github.com/vmware-tanzu/velero/pkg/test"
 	testutil "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
+	resticmocks "github.com/vmware-tanzu/velero/pkg/uploader/mocks"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/volume"
@@ -2684,7 +2684,7 @@ type fakeResticRestorerFactory struct {
 	restorer *resticmocks.Restorer
 }
 
-func (f *fakeResticRestorerFactory) NewRestorer(context.Context, *velerov1api.Restore) (restic.Restorer, error) {
+func (f *fakeResticRestorerFactory) NewRestorer(context.Context, *velerov1api.Restore) (uploader.Restorer, error) {
 	return f.restorer, nil
 }
 
@@ -2773,7 +2773,7 @@ func TestRestoreWithRestic(t *testing.T) {
 
 				// the restore process adds these labels before restoring, so we must add them here too otherwise they won't match
 				pod.Labels = map[string]string{"velero.io/backup-name": tc.backup.Name, "velero.io/restore-name": tc.restore.Name}
-				expectedArgs := restic.RestoreData{
+				expectedArgs := uploader.RestoreData{
 					Restore:          tc.restore,
 					Pod:              pod,
 					PodVolumeBackups: tc.podVolumeBackups,

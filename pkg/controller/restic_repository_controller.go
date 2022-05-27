@@ -32,7 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/repository/repoconfig"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -42,27 +43,36 @@ const (
 
 type ResticRepoReconciler struct {
 	client.Client
-	namespace                   string
-	logger                      logrus.FieldLogger
-	clock                       clock.Clock
-	defaultMaintenanceFrequency time.Duration
-	repositoryManager           restic.RepositoryManager
+	namespace                        string
+	logger                           logrus.FieldLogger
+	clock                            clock.Clock
+	defaultMaintenanceFrequency      time.Duration
+	defaultQuickMaintenanceFrequency time.Duration
+	repositoryManager                repository.RepositoryManager
+	legacyRepo                       bool
 }
 
 func NewResticRepoReconciler(namespace string, logger logrus.FieldLogger, client client.Client,
-	defaultMaintenanceFrequency time.Duration, repositoryManager restic.RepositoryManager) *ResticRepoReconciler {
+	defaultMaintenanceFrequency time.Duration, defaultQuickMaintenanceFrequency time.Duration, legacyRepo bool, repositoryManager repository.RepositoryManager) *ResticRepoReconciler {
 	c := &ResticRepoReconciler{
 		client,
 		namespace,
 		logger,
 		clock.RealClock{},
 		defaultMaintenanceFrequency,
+		defaultQuickMaintenanceFrequency,
 		repositoryManager,
+		legacyRepo,
 	}
 
 	if c.defaultMaintenanceFrequency <= 0 {
-		logger.Infof("Invalid default restic maintenance frequency, setting to %v", restic.DefaultMaintenanceFrequency)
-		c.defaultMaintenanceFrequency = restic.DefaultMaintenanceFrequency
+		logger.Infof("Invalid default restic maintenance frequency, setting to %v", repository.DefaultMaintenanceFrequency)
+		c.defaultMaintenanceFrequency = repository.DefaultMaintenanceFrequency
+	}
+
+	if c.defaultQuickMaintenanceFrequency <= 0 {
+		logger.Infof("Invalid default restic quick maintenance frequency, setting to %v", repository.DefaultQuickMaintenanceFrequency)
+		c.defaultQuickMaintenanceFrequency = repository.DefaultQuickMaintenanceFrequency
 	}
 
 	return c
@@ -108,7 +118,7 @@ func (r *ResticRepoReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// this fails for any reason, it's non-critical so we still continue on to the
 	// rest of the "process" logic.
 	log.Debug("Checking repository for stale locks")
-	if err := r.repositoryManager.UnlockRepo(resticRepo); err != nil {
+	if err := r.repositoryManager.EnsureUnlockRepo(resticRepo); err != nil {
 		log.WithError(err).Error("Error checking repository for stale locks")
 	}
 
@@ -132,11 +142,14 @@ func (r *ResticRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 		Namespace: req.Namespace,
 		Name:      req.Spec.BackupStorageLocation,
 	}, loc); err != nil {
+		log.WithError(err).WithField("location", req.Spec.BackupStorageLocation).WithField("namespace", req.Namespace).
+			Error("Failed to get repo's BackupStorageLocation")
 		return r.patchResticRepository(ctx, req, patchHelper, log, repoNotReady(err.Error()))
 	}
 
-	repoIdentifier, err := restic.GetRepoIdentifier(loc, req.Spec.VolumeNamespace)
+	repoIdentifier, err := repoconfig.GetRepoIdentifier(loc, req.Spec.VolumeNamespace, r.legacyRepo)
 	if err != nil {
+		log.WithError(err).Error("Failed to get repo identifier")
 		return r.patchResticRepository(ctx, req, patchHelper, log, func(rr *velerov1api.ResticRepository) {
 			rr.Status.Message = err.Error()
 			rr.Status.Phase = velerov1api.ResticRepositoryPhaseNotReady
@@ -146,6 +159,8 @@ func (r *ResticRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 			}
 		})
 	}
+
+	log.Debugf("repo identifer %s", repoIdentifier)
 
 	// defaulting - if the patch fails, return an error so the item is returned to the queue
 	if err := r.patchResticRepository(ctx, req, patchHelper, log, func(rr *velerov1api.ResticRepository) {
@@ -158,26 +173,36 @@ func (r *ResticRepoReconciler) initializeRepo(ctx context.Context, req *velerov1
 		return err
 	}
 
+	log.Debug("Connecting to repo")
+
 	if err := ensureRepo(req, r.repositoryManager); err != nil {
+		log.WithError(err).Error("Failed to connect to repo")
 		return r.patchResticRepository(ctx, req, patchHelper, log, repoNotReady(err.Error()))
 	}
 
-	return r.patchResticRepository(ctx, req, patchHelper, log, func(rr *velerov1api.ResticRepository) {
+	log.Debug("Repo is connected")
+
+	err = r.patchResticRepository(ctx, req, patchHelper, log, func(rr *velerov1api.ResticRepository) {
 		rr.Status.Phase = velerov1api.ResticRepositoryPhaseReady
 		rr.Status.LastMaintenanceTime = &metav1.Time{Time: time.Now()}
 	})
+
+	log.Debugf("Patch restic repository %s, phase %s", req.Name, req.Status.Phase)
+
+	return err
 }
 
 // ensureRepo checks to see if a repository exists, and attempts to initialize it if
 // it does not exist. An error is returned if the repository can't be connected to
 // or initialized.
-func ensureRepo(repo *velerov1api.ResticRepository, repoManager restic.RepositoryManager) error {
+func ensureRepo(repo *velerov1api.ResticRepository, repoManager repository.RepositoryManager) error {
 	if err := repoManager.ConnectToRepo(repo); err != nil {
 		// If the repository has not yet been initialized, the error message will always include
 		// the following string. This is the only scenario where we should try to initialize it.
 		// Other errors (e.g. "already locked") should be returned as-is since the repository
 		// does already exist, but it can't be connected to.
-		if strings.Contains(err.Error(), "Is there a repository at the following location?") {
+		if strings.Contains(err.Error(), "repository not initialized in the provided storage") ||
+			strings.Contains(err.Error(), "Is there a repository at the following location?") {
 			return repoManager.InitRepo(repo)
 		}
 

@@ -36,7 +36,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/label"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -96,7 +96,7 @@ func (a *ResticRestoreAction) Execute(input *velero.RestoreItemActionExecuteInpu
 	for i := range podVolumeBackupList.Items {
 		podVolumeBackups = append(podVolumeBackups, &podVolumeBackupList.Items[i])
 	}
-	volumeSnapshots := restic.GetVolumeBackupsForPod(podVolumeBackups, &pod, podFromBackup.Namespace)
+	volumeSnapshots := uploader.GetVolumeBackupsForPod(podVolumeBackups, &pod, podFromBackup.Namespace)
 	if len(volumeSnapshots) == 0 {
 		log.Debug("No restic backups found for pod")
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
@@ -160,7 +160,7 @@ func (a *ResticRestoreAction) Execute(input *velero.RestoreItemActionExecuteInpu
 	initContainerBuilder.Command(getCommand(log, config))
 
 	initContainer := *initContainerBuilder.Result()
-	if len(pod.Spec.InitContainers) == 0 || pod.Spec.InitContainers[0].Name != restic.InitContainer {
+	if len(pod.Spec.InitContainers) == 0 || pod.Spec.InitContainers[0].Name != uploader.InitContainer {
 		pod.Spec.InitContainers = append([]corev1.Container{initContainer}, pod.Spec.InitContainers...)
 	} else {
 		pod.Spec.InitContainers[0] = initContainer
@@ -289,7 +289,7 @@ func getPluginConfig(kind framework.PluginKind, name string, client corev1client
 }
 
 func newResticInitContainerBuilder(image, restoreUID string) *builder.ContainerBuilder {
-	return builder.ForContainer(restic.InitContainer, image).
+	return builder.ForContainer(uploader.InitContainer, image).
 		Args(restoreUID).
 		Env([]*corev1.EnvVar{
 			{

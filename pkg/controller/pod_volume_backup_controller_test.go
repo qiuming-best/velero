@@ -38,7 +38,6 @@ import (
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/builder"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/restic/mocks"
 	velerotest "github.com/vmware-tanzu/velero/pkg/test"
 )
 
@@ -114,7 +113,6 @@ var _ = Describe("PodVolumeBackup Reconciler", func() {
 				CredsFileStore: fakeCredsFileStore{},
 				NodeName:       "test_node",
 				FileSystem:     fakeFS,
-				ResticExec:     mocks.FakeResticBackupExec{},
 				Log:            velerotest.NewLogger(),
 			}
 
@@ -290,4 +288,8 @@ type fakeCredsFileStore struct{}
 
 func (f fakeCredsFileStore) Path(selector *corev1.SecretKeySelector) (string, error) {
 	return "/fake/path", nil
+}
+
+func (f fakeCredsFileStore) Buffer(selector *corev1.SecretKeySelector) ([]byte, error) {
+	return nil, nil
 }

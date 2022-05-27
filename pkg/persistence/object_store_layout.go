@@ -35,11 +35,12 @@ func NewObjectStoreLayout(prefix string) *ObjectStoreLayout {
 	}
 
 	subdirs := map[string]string{
-		"backups":  path.Join(prefix, "backups") + "/",
-		"restores": path.Join(prefix, "restores") + "/",
-		"restic":   path.Join(prefix, "restic") + "/",
-		"metadata": path.Join(prefix, "metadata") + "/",
-		"plugins":  path.Join(prefix, "plugins") + "/",
+		"backups":      path.Join(prefix, "backups") + "/",
+		"restores":     path.Join(prefix, "restores") + "/",
+		"restic":       path.Join(prefix, "restic") + "/",
+		"unified-repo": path.Join(prefix, "unified-repo") + "/",
+		"metadata":     path.Join(prefix, "metadata") + "/",
+		"plugins":      path.Join(prefix, "plugins") + "/",
 	}
 
 	return &ObjectStoreLayout{
@@ -48,11 +49,15 @@ func NewObjectStoreLayout(prefix string) *ObjectStoreLayout {
 	}
 }
 
-// GetResticDir returns the full prefix representing the restic
+// GetRepositoryDir returns the full prefix representing the repository
 // directory within an object storage bucket containing a backup
 // store.
-func (l *ObjectStoreLayout) GetResticDir() string {
-	return l.subdirs["restic"]
+func (l *ObjectStoreLayout) GetRepositoryDir(legacyRepo bool) string {
+	if legacyRepo {
+		return l.subdirs["restic"]
+	} else {
+		return l.subdirs["unified-repo"]
+	}
 }
 
 func (l *ObjectStoreLayout) isValidSubdir(name string) bool {

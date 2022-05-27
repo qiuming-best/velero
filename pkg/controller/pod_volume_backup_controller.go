@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -36,16 +35,11 @@ import (
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
-
-// BackupExecuter runs backups.
-type BackupExecuter interface {
-	RunBackup(*restic.Command, logrus.FieldLogger, func(velerov1api.PodVolumeOperationProgress)) (string, string, error)
-	GetSnapshotID(*restic.Command) (string, error)
-}
 
 // PodVolumeBackupReconciler reconciles a PodVolumeBackup object
 type PodVolumeBackupReconciler struct {
@@ -56,8 +50,9 @@ type PodVolumeBackupReconciler struct {
 	CredsFileStore credentials.FileStore
 	NodeName       string
 	FileSystem     filesystem.Interface
-	ResticExec     BackupExecuter
 	Log            logrus.FieldLogger
+	Ctx            context.Context
+	LegacyUploader bool
 }
 
 // +kubebuilder:rbac:groups=velero.io,resources=podvolumebackups,verbs=get;list;watch;create;update;patch;delete
@@ -130,54 +125,68 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.updateStatusToFailed(ctx, &pvb, err, fmt.Sprintf("getting pod %s/%s", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name), log)
 	}
 
-	var resticDetails resticDetails
-	resticCmd, err := r.buildResticCommand(ctx, log, &pvb, &pod, &resticDetails)
+	volDir, err := kube.GetVolumeDirectory(ctx, log, &pod, pvb.Spec.Volume, r.Client)
 	if err != nil {
-		return r.updateStatusToFailed(ctx, &pvb, err, "building Restic command", log)
+		return r.updateStatusToFailed(ctx, &pvb, err, "getting volume directory name", log)
 	}
-	defer os.Remove(resticDetails.credsFile)
+
+	pathGlob := fmt.Sprintf("/host_pods/%s/volumes/*/%s", string(pvb.Spec.Pod.UID), volDir)
+	log.WithField("pathGlob", pathGlob).Debug("Looking for path matching glob")
+
+	path, err := r.singlePathMatch(pathGlob)
+	if err != nil {
+		return r.updateStatusToFailed(ctx, &pvb, err, "identifying unique volume path on host", log)
+	}
+	log.WithField("path", path).Debugf("Found path matching glob")
 
 	backupLocation := &velerov1api.BackupStorageLocation{}
 	if err := r.Client.Get(context.Background(), client.ObjectKey{
 		Namespace: pvb.Namespace,
 		Name:      pvb.Spec.BackupStorageLocation,
 	}, backupLocation); err != nil {
-		return ctrl.Result{}, errors.Wrap(err, "error getting backup storage location")
+		return r.updateStatusToFailed(ctx, &pvb, err, "error getting backup storage location", log)
 	}
 
-	// #4820: restrieve insecureSkipTLSVerify from BSL configuration for
-	// AWS plugin. If nothing is return, that means insecureSkipTLSVerify
-	// is not enable for Restic command.
-	skipTLSRet := restic.GetInsecureSkipTLSVerifyFromBSL(backupLocation, log)
-	if len(skipTLSRet) > 0 {
-		resticCmd.ExtraFlags = append(resticCmd.ExtraFlags, skipTLSRet)
+	var uploaderProv uploader.UploaderProvider
+	uploaderProv, err = uploader.NewUploaderProvider(
+		r.Ctx, r.LegacyUploader, pvb.Spec.RepoIdentifier, pvb.Namespace, backupLocation,
+		r.CredsFileStore, repository.RepoKeySelector(), r.Client, "", log)
+	if err != nil {
+		return r.updateStatusToFailed(ctx, &pvb, err, "error creating uploader", log)
+	}
+
+	// If this is a PVC, look for the most recent completed pod volume backup for it and get
+	// its restic snapshot ID to use as the value of the `--parent` flag. Without this,
+	// if the pod using the PVC (and therefore the directory path under /host_pods/) has
+	// changed since the PVC's last backup, restic will not be able to identify a suitable
+	// parent snapshot to use, and will have to do a full rescan of the contents of the PVC.
+	var parentSnapshotID string
+	if pvcUID, ok := pvb.Labels[velerov1api.PVCUIDLabel]; ok {
+		parentSnapshotID = r.getParentSnapshot(ctx, log, pvb.Namespace, pvcUID, pvb.Spec.BackupStorageLocation)
+		if parentSnapshotID == "" {
+			log.Info("No parent snapshot found for PVC, not using --parent flag for this backup")
+		} else {
+			log.WithField("parentSnapshotID", parentSnapshotID).
+				Info("Setting --parent flag for this backup")
+		}
 	}
 
 	var stdout, stderr string
 
 	var emptySnapshot bool
-	stdout, stderr, err = r.ResticExec.RunBackup(resticCmd, log, r.updateBackupProgressFunc(&pvb, log))
-	if err != nil {
+	if stdout, stderr, err = uploaderProv.RunBackup(path, pvb.Spec.Tags, parentSnapshotID, r.updateBackupProgressFunc(&pvb, log)); err != nil {
 		if strings.Contains(stderr, "snapshot is empty") {
 			emptySnapshot = true
 		} else {
-			return r.updateStatusToFailed(ctx, &pvb, err, fmt.Sprintf("running Restic backup, stderr=%s", stderr), log)
+			log.WithError(errors.WithStack(err)).Errorf("Error running uploader backup=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
+			return r.updateStatusToFailed(ctx, &pvb, err, "error running uploader backup", log)
 		}
 	}
-	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", resticCmd.String(), stdout, stderr)
+	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
 
 	var snapshotID string
 	if !emptySnapshot {
-		cmd := restic.GetSnapshotCommand(pvb.Spec.RepoIdentifier, resticDetails.credsFile, pvb.Spec.Tags)
-		cmd.Env = resticDetails.envs
-		cmd.CACertFile = resticDetails.caCertFile
-
-		// #4820: also apply the insecureTLS flag to Restic snapshots command
-		if len(skipTLSRet) > 0 {
-			cmd.ExtraFlags = append(cmd.ExtraFlags, skipTLSRet)
-		}
-
-		snapshotID, err = r.ResticExec.GetSnapshotID(cmd)
+		snapshotID, err = uploaderProv.GetSnapshotID()
 		if err != nil {
 			return r.updateStatusToFailed(ctx, &pvb, err, "getting snapshot id", log)
 		}
@@ -185,7 +194,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	// Update status to Completed with path & snapshot ID.
 	original = pvb.DeepCopy()
-	pvb.Status.Path = resticDetails.path
+	pvb.Status.Path = path
 	pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseCompleted
 	pvb.Status.SnapshotID = snapshotID
 	pvb.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
@@ -200,8 +209,8 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	latencyDuration := pvb.Status.CompletionTimestamp.Time.Sub(pvb.Status.StartTimestamp.Time)
 	latencySeconds := float64(latencyDuration / time.Second)
 	backupName := fmt.Sprintf("%s/%s", req.Namespace, pvb.OwnerReferences[0].Name)
-	r.Metrics.ObserveResticOpLatency(r.NodeName, req.Name, resticCmd.Command, backupName, latencySeconds)
-	r.Metrics.RegisterResticOpLatencyGauge(r.NodeName, req.Name, resticCmd.Command, backupName, latencySeconds)
+	r.Metrics.ObserveResticOpLatency(r.NodeName, req.Name, uploaderProv.GetTaskName(), backupName, latencySeconds)
+	r.Metrics.RegisterResticOpLatencyGauge(r.NodeName, req.Name, uploaderProv.GetTaskName(), backupName, latencySeconds)
 	r.Metrics.RegisterPodVolumeBackupDequeue(r.NodeName)
 
 	log.Info("PodVolumeBackup completed")
@@ -307,81 +316,4 @@ func (r *PodVolumeBackupReconciler) updateStatusToFailed(ctx context.Context, pv
 	}
 
 	return ctrl.Result{}, nil
-}
-
-type resticDetails struct {
-	credsFile, caCertFile string
-	envs                  []string
-	path                  string
-}
-
-func (r *PodVolumeBackupReconciler) buildResticCommand(ctx context.Context, log *logrus.Entry, pvb *velerov1api.PodVolumeBackup, pod *corev1.Pod, details *resticDetails) (*restic.Command, error) {
-	volDir, err := kube.GetVolumeDirectory(ctx, log, pod, pvb.Spec.Volume, r.Client)
-	if err != nil {
-		return nil, errors.Wrap(err, "getting volume directory name")
-	}
-
-	pathGlob := fmt.Sprintf("/host_pods/%s/volumes/*/%s", string(pvb.Spec.Pod.UID), volDir)
-	log.WithField("pathGlob", pathGlob).Debug("Looking for path matching glob")
-
-	path, err := r.singlePathMatch(pathGlob)
-	if err != nil {
-		return nil, errors.Wrap(err, "identifying unique volume path on host")
-	}
-	log.WithField("path", path).Debugf("Found path matching glob")
-
-	// Temporary credentials.
-	details.credsFile, err = r.CredsFileStore.Path(restic.RepoKeySelector())
-	if err != nil {
-		return nil, errors.Wrap(err, "creating temporary Restic credentials file")
-	}
-
-	cmd := restic.BackupCommand(pvb.Spec.RepoIdentifier, details.credsFile, path, pvb.Spec.Tags)
-
-	backupLocation := &velerov1api.BackupStorageLocation{}
-	if err := r.Client.Get(context.Background(), client.ObjectKey{
-		Namespace: pvb.Namespace,
-		Name:      pvb.Spec.BackupStorageLocation,
-	}, backupLocation); err != nil {
-		return nil, errors.Wrap(err, "getting backup storage location")
-	}
-
-	// If there's a caCert on the ObjectStorage, write it to disk so that it can
-	// be passed to Restic.
-	if backupLocation.Spec.ObjectStorage != nil &&
-		backupLocation.Spec.ObjectStorage.CACert != nil {
-
-		details.caCertFile, err = restic.TempCACertFile(backupLocation.Spec.ObjectStorage.CACert, pvb.Spec.BackupStorageLocation, r.FileSystem)
-		if err != nil {
-			log.WithError(err).Error("creating temporary caCert file")
-		}
-		defer os.Remove(details.caCertFile)
-
-	}
-	cmd.CACertFile = details.caCertFile
-
-	details.envs, err = restic.CmdEnv(backupLocation, r.CredsFileStore)
-	if err != nil {
-		return nil, errors.Wrap(err, "setting Restic command environment")
-	}
-	cmd.Env = details.envs
-
-	// If this is a PVC, look for the most recent completed PodVolumeBackup for
-	// it and get its Restic snapshot ID to use as the value of the `--parent`
-	// flag. Without this, if the pod using the PVC (and therefore the directory
-	// path under /host_pods/) has changed since the PVC's last backup, Restic
-	// will not be able to identify a suitable parent snapshot to use, and will
-	// have to do a full rescan of the contents of the PVC.
-	if pvcUID, ok := pvb.Labels[velerov1api.PVCUIDLabel]; ok {
-		parentSnapshotID := r.getParentSnapshot(ctx, log, pvb.Namespace, pvcUID, pvb.Spec.BackupStorageLocation)
-		if parentSnapshotID == "" {
-			log.Info("No parent snapshot found for PVC, not using --parent flag for this backup")
-		} else {
-			log.WithField("parentSnapshotID", parentSnapshotID).
-				Info("Setting --parent flag for this backup")
-			cmd.ExtraFlags = append(cmd.ExtraFlags, fmt.Sprintf("--parent=%s", parentSnapshotID))
-		}
-	}
-
-	return cmd, nil
 }

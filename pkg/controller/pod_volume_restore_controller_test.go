@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
-	"github.com/vmware-tanzu/velero/pkg/restic"
 	"github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 )
 
 func TestShouldProcess(t *testing.T) {
@@ -163,7 +163,7 @@ func TestShouldProcess(t *testing.T) {
 					NodeName: controllerNode,
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 					},
 				},
@@ -203,7 +203,7 @@ func TestShouldProcess(t *testing.T) {
 					NodeName: controllerNode,
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 					},
 				},
@@ -309,7 +309,7 @@ func TestIsResticContainerRunning(t *testing.T) {
 							Name: "non-restic-init",
 						},
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 					},
 				},
@@ -340,7 +340,7 @@ func TestIsResticContainerRunning(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 						{
 							Name: "non-restic-init",
@@ -372,7 +372,7 @@ func TestIsResticContainerRunning(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 						{
 							Name: "non-restic-init",
@@ -406,7 +406,7 @@ func TestIsResticContainerRunning(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 					},
 				},
@@ -471,7 +471,7 @@ func TestGetResticInitContainerIndex(t *testing.T) {
 							Name: "non-restic-init",
 						},
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 					},
 				},
@@ -488,7 +488,7 @@ func TestGetResticInitContainerIndex(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 						{
 							Name: "non-restic-init",
@@ -508,7 +508,7 @@ func TestGetResticInitContainerIndex(t *testing.T) {
 				Spec: corev1api.PodSpec{
 					InitContainers: []corev1api.Container{
 						{
-							Name: restic.InitContainer,
+							Name: uploader.InitContainer,
 						},
 						{
 							Name: "non-restic-init",

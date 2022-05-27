@@ -180,6 +180,11 @@ func (b *objectBackupStoreGetter) Get(location *velerov1api.BackupStorageLocatio
 }
 
 func (s *objectBackupStore) IsValid() error {
+	s.logger.WithFields(logrus.Fields{
+		"bucket": s.bucket,
+		"prefix": s.layout.rootPrefix,
+	}).Debug("Checking backup store")
+
 	dirs, err := s.objectStore.ListCommonPrefixes(s.bucket, s.layout.rootPrefix, "/")
 	if err != nil {
 		return errors.WithStack(err)
@@ -198,7 +203,7 @@ func (s *objectBackupStore) IsValid() error {
 		if len(invalid) > 3 {
 			return errors.Errorf("Backup store contains %d invalid top-level directories: %v", len(invalid), append(invalid[:3], "..."))
 		}
-		return errors.Errorf("Backup store contains invalid top-level directories: %v", invalid)
+		return errors.Errorf("Backup store contains invalid top-level directories: %v, bucket %s, dirs: %v", invalid, s.bucket, dirs)
 	}
 
 	return nil

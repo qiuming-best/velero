@@ -47,9 +47,9 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/discovery"
 	"github.com/vmware-tanzu/velero/pkg/kuberesource"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/restic"
 	"github.com/vmware-tanzu/velero/pkg/test"
 	testutil "github.com/vmware-tanzu/velero/pkg/test"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 	"github.com/vmware-tanzu/velero/pkg/volume"
 )
@@ -2595,7 +2595,7 @@ func TestBackupWithHooks(t *testing.T) {
 
 type fakeResticBackupperFactory struct{}
 
-func (f *fakeResticBackupperFactory) NewBackupper(context.Context, *velerov1.Backup) (restic.Backupper, error) {
+func (f *fakeResticBackupperFactory) NewBackupper(context.Context, *velerov1.Backup) (uploader.Backupper, error) {
 	return &fakeResticBackupper{}, nil
 }
 

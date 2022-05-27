@@ -48,7 +48,6 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
 	"github.com/vmware-tanzu/velero/pkg/controller"
 	"github.com/vmware-tanzu/velero/pkg/metrics"
-	"github.com/vmware-tanzu/velero/pkg/restic"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
 )
@@ -70,6 +69,8 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 	logLevelFlag := logging.LogLevelFlag(logrus.InfoLevel)
 	formatFlag := logging.NewFormatFlag()
 
+	var legacyUploader bool
+
 	command := &cobra.Command{
 		Use:    "server",
 		Short:  "Run the velero restic server",
@@ -83,7 +84,7 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 			logger.Infof("Starting Velero restic server %s (%s)", buildinfo.Version, buildinfo.FormattedGitSHA())
 
 			f.SetBasename(fmt.Sprintf("%s-%s", c.Parent().Name(), c.Name()))
-			s, err := newResticServer(logger, f, defaultMetricsAddress)
+			s, err := newResticServer(logger, f, defaultMetricsAddress, legacyUploader)
 			cmd.CheckError(err)
 
 			s.run()
@@ -92,6 +93,7 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 
 	command.Flags().Var(logLevelFlag, "log-level", fmt.Sprintf("The level at which to log. Valid values are %s.", strings.Join(logLevelFlag.AllowedValues(), ", ")))
 	command.Flags().Var(formatFlag, "log-format", fmt.Sprintf("The format for log output. Valid values are %s.", strings.Join(formatFlag.AllowedValues(), ", ")))
+	command.Flags().BoolVar(&legacyUploader, "legacy-uploader", true, "Use legacy Restic uploader.")
 
 	return command
 }
@@ -105,9 +107,12 @@ type resticServer struct {
 	metrics        *metrics.ServerMetrics
 	metricsAddress string
 	namespace      string
+	legacyUploader bool
 }
 
-func newResticServer(logger logrus.FieldLogger, factory client.Factory, metricAddress string) (*resticServer, error) {
+func newResticServer(logger logrus.FieldLogger, factory client.Factory, metricAddress string, legacyUploader bool) (*resticServer, error) {
+
+	logger.Debugf("Use Legacy Uploader: %t", legacyUploader)
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	clientConfig, err := factory.ClientConfig()
@@ -145,6 +150,7 @@ func newResticServer(logger logrus.FieldLogger, factory client.Factory, metricAd
 		mgr:            mgr,
 		metricsAddress: metricAddress,
 		namespace:      factory.Namespace(),
+		legacyUploader: legacyUploader,
 	}
 
 	// the cache isn't initialized yet when "validatePodVolumesHostPath" is called, the client returned by the manager cannot
@@ -188,6 +194,7 @@ func (s *resticServer) run() {
 	}
 
 	pvbReconciler := controller.PodVolumeBackupReconciler{
+		Ctx:            s.ctx,
 		Scheme:         s.mgr.GetScheme(),
 		Client:         s.mgr.GetClient(),
 		Clock:          clock.RealClock{},
@@ -195,14 +202,14 @@ func (s *resticServer) run() {
 		CredsFileStore: credentialFileStore,
 		NodeName:       os.Getenv("NODE_NAME"),
 		FileSystem:     filesystem.NewFileSystem(),
-		ResticExec:     restic.BackupExec{},
 		Log:            s.logger,
+		LegacyUploader: s.legacyUploader,
 	}
 	if err := pvbReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", controller.PodVolumeBackup)
 	}
 
-	if err = controller.NewPodVolumeRestoreReconciler(s.logger, s.mgr.GetClient(), credentialFileStore).SetupWithManager(s.mgr); err != nil {
+	if err = controller.NewPodVolumeRestoreReconciler(s.ctx, s.logger, s.mgr.GetClient(), credentialFileStore, s.legacyUploader).SetupWithManager(s.mgr); err != nil {
 		s.logger.WithError(err).Fatal("Unable to create the pod volume restore controller")
 	}
 

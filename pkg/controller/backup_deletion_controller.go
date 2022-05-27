@@ -41,7 +41,8 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/persistence"
 	"github.com/vmware-tanzu/velero/pkg/plugin/clientmgmt"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"github.com/vmware-tanzu/velero/pkg/restic"
+	"github.com/vmware-tanzu/velero/pkg/repository"
+	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 
@@ -57,7 +58,7 @@ type backupDeletionReconciler struct {
 	client.Client
 	logger            logrus.FieldLogger
 	backupTracker     BackupTracker
-	resticMgr         restic.RepositoryManager
+	repoMgr           repository.RepositoryManager
 	metrics           *metrics.ServerMetrics
 	clock             clock.Clock
 	discoveryHelper   discovery.Helper
@@ -70,7 +71,7 @@ func NewBackupDeletionReconciler(
 	logger logrus.FieldLogger,
 	client client.Client,
 	backupTracker BackupTracker,
-	resticMgr restic.RepositoryManager,
+	repoMgr repository.RepositoryManager,
 	metrics *metrics.ServerMetrics,
 	helper discovery.Helper,
 	newPluginManager func(logrus.FieldLogger) clientmgmt.Manager,
@@ -80,7 +81,7 @@ func NewBackupDeletionReconciler(
 		Client:            client,
 		logger:            logger,
 		backupTracker:     backupTracker,
-		resticMgr:         resticMgr,
+		repoMgr:           repoMgr,
 		metrics:           metrics,
 		clock:             clock.RealClock{},
 		discoveryHelper:   helper,
@@ -436,11 +437,11 @@ func (r *backupDeletionReconciler) deleteExistingDeletionRequests(ctx context.Co
 }
 
 func (r *backupDeletionReconciler) deleteResticSnapshots(ctx context.Context, backup *velerov1api.Backup) []error {
-	if r.resticMgr == nil {
+	if r.repoMgr == nil {
 		return nil
 	}
 
-	snapshots, err := restic.GetSnapshotsInBackup(ctx, backup, r.Client)
+	snapshots, err := uploader.GetSnapshotsInBackup(ctx, backup, r.Client)
 	if err != nil {
 		return []error{err}
 	}
@@ -450,7 +451,7 @@ func (r *backupDeletionReconciler) deleteResticSnapshots(ctx context.Context, ba
 
 	var errs []error
 	for _, snapshot := range snapshots {
-		if err := r.resticMgr.Forget(ctx2, snapshot); err != nil {
+		if err := r.repoMgr.Forget(ctx2, snapshot.SnapshotID, snapshot.VolumeNamespace, snapshot.BackupStorageLocation); err != nil {
 			errs = append(errs, err)
 		}
 	}

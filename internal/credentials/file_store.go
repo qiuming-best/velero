@@ -35,6 +35,7 @@ type FileStore interface {
 	// Path returns a path on disk where the secret key defined by
 	// the given selector is serialized.
 	Path(selector *corev1api.SecretKeySelector) (string, error)
+	Buffer(selector *corev1api.SecretKeySelector) ([]byte, error)
 }
 
 type namespacedFileStore struct {
@@ -85,4 +86,13 @@ func (n *namespacedFileStore) Path(selector *corev1api.SecretKeySelector) (strin
 	}
 
 	return keyFilePath, nil
+}
+
+func (n *namespacedFileStore) Buffer(selector *corev1api.SecretKeySelector) ([]byte, error) {
+	creds, err := kube.GetSecretKey(n.client, n.namespace, selector)
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to get key for secret")
+	}
+
+	return creds, nil
 }
