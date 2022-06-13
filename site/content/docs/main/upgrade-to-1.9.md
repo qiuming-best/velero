@@ -1,11 +1,11 @@
 ---
-title: "Upgrading to Velero 1.8"
+title: "Upgrading to Velero 1.9"
 layout: docs
 ---
 
 ## Prerequisites
 
-- Velero [v1.7.x][7] installed.
+- Velero [v1.8.x][8] installed.
 
 If you're not yet running at least Velero v1.6, see the following:
 
@@ -16,12 +16,13 @@ If you're not yet running at least Velero v1.6, see the following:
 - [Upgrading to v1.5][5]
 - [Upgrading to v1.6][6]
 - [Upgrading to v1.7][7]
+- [Upgrading to v1.8][8]
 
 Before upgrading, check the [Velero compatibility matrix](https://github.com/vmware-tanzu/velero#velero-compatabilty-matrix) to make sure your version of Kubernetes is supported by the new version of Velero.
 
 ## Instructions
 
-1. Install the Velero v1.8 command-line interface (CLI) by following the [instructions here][0].
+1. Install the Velero v1.9 command-line interface (CLI) by following the [instructions here][0].
 
     Verify that you've properly installed it by running:
 
@@ -33,7 +34,7 @@ Before upgrading, check the [Velero compatibility matrix](https://github.com/vmw
 
     ```bash
     Client:
-        Version: v1.8.0
+        Version: v1.9.0
         Git commit: <git SHA>
     ```
 
@@ -43,18 +44,18 @@ Before upgrading, check the [Velero compatibility matrix](https://github.com/vmw
     velero install --crds-only --dry-run -o yaml | kubectl apply -f -
     ```
 
-    **NOTE:** Since velero v1.8.0 only v1 CRD will be supported during installation, therefore, the v1.8.0 will only work on kubernetes version >= v1.16
+    **NOTE:** Since velero v1.9.0 only v1 CRD will be supported during installation, therefore, the v1.9.0 will only work on kubernetes version >= v1.16
 
 1. Update the container image used by the Velero deployment and, optionally, the restic daemon set:
 
     ```bash
     kubectl set image deployment/velero \
-        velero=velero/velero:v1.8.0 \
+        velero=velero/velero:v1.9.0 \
         --namespace velero
 
     # optional, if using the restic daemon set
     kubectl set image daemonset/restic \
-        restic=velero/velero:v1.8.0 \
+        restic=velero/velero:v1.9.0 \
         --namespace velero
     ```
 
@@ -68,11 +69,11 @@ Before upgrading, check the [Velero compatibility matrix](https://github.com/vmw
 
     ```bash
     Client:
-        Version: v1.8.0
+        Version: v1.9.0
         Git commit: <git SHA>
 
     Server:
-        Version: v1.8.0
+        Version: v1.9.0
     ```
 
 ## Notes
@@ -89,4 +90,5 @@ After upgrading, if there is a previously created backup storage location with t
 [5]: https://velero.io/docs/v1.5/upgrade-to-1.5
 [6]: https://velero.io/docs/v1.6/upgrade-to-1.6
 [7]: https://velero.io/docs/v1.7/upgrade-to-1.7
-[9]: https://velero.io/docs/v1.8/locations
+[8]: https://velero.io/docs/v1.8/upgrade-to-1.8
+[9]: https://velero.io/docs/v1.9/locations
