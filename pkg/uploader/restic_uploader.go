@@ -2,6 +2,7 @@ package uploader
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -78,6 +79,10 @@ func NewResticUploaderProvider(
 	return &resticUploaderProvider, nil
 }
 
+//Not implement yet
+func (rup *resticUploaderProvider) Cancel() {
+}
+
 func (rup *resticUploaderProvider) Close() {
 	os.Remove(rup.credentialsFile)
 	os.Remove(rup.caCertFile)
@@ -116,10 +121,11 @@ func (rup *resticUploaderProvider) GetSnapshotID() (string, error) {
 // RunBackup runs a `backup` command and watches the output to provide
 // progress updates to the caller.
 func (rup *resticUploaderProvider) RunBackup(
+	ctx context.Context,
 	path string,
 	tags map[string]string,
 	parentSnapshot string,
-	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
+	updateFunc func(velerov1api.PodVolumeOperationProgress, string)) (string, string, error) {
 	// buffers for copying command stdout/err output into
 	stdoutBuf := new(bytes.Buffer)
 	stderrBuf := new(bytes.Buffer)
@@ -172,7 +178,7 @@ func (rup *resticUploaderProvider) RunBackup(
 						updateFunc(velerov1api.PodVolumeOperationProgress{
 							TotalBytes: stat.TotalBytes,
 							BytesDone:  stat.BytesDone,
-						})
+						}, "")
 					}
 				}
 			case <-quit:
@@ -204,7 +210,7 @@ func (rup *resticUploaderProvider) RunBackup(
 	updateFunc(velerov1api.PodVolumeOperationProgress{
 		TotalBytes: stat.TotalBytesProcessed,
 		BytesDone:  stat.TotalBytesProcessed,
-	})
+	}, "")
 
 	return string(summary), stderrBuf.String(), nil
 }
@@ -216,6 +222,7 @@ func (rup *resticUploaderProvider) GetTaskName() string {
 // RunRestore runs a `restore` command and monitors the volume size to
 // provide progress updates to the caller.
 func (rup *resticUploaderProvider) RunRestore(
+	ctx context.Context,
 	snapshotID string,
 	volumePath string,
 	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {

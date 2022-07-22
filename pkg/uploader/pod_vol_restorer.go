@@ -61,16 +61,17 @@ type restorer struct {
 func newRestorer(
 	ctx context.Context,
 	rm repository.RepositoryManager,
+	veleroClient clientset.Interface,
 	podVolumeRestoreInformer cache.SharedIndexInformer,
 	pvcClient corev1client.PersistentVolumeClaimsGetter,
 	log logrus.FieldLogger,
 ) *restorer {
 	r := &restorer{
-		ctx:         ctx,
-		repoManager: rm,
-		pvcClient:   pvcClient,
-
-		results: make(map[string]chan *velerov1api.PodVolumeRestore),
+		ctx:          ctx,
+		repoManager:  rm,
+		pvcClient:    pvcClient,
+		veleroClient: veleroClient,
+		results:      make(map[string]chan *velerov1api.PodVolumeRestore),
 	}
 
 	podVolumeRestoreInformer.AddEventHandler(
@@ -142,7 +143,6 @@ func (r *restorer) RestorePodVolumes(data RestoreData) []error {
 		}
 
 		volumeRestore := newPodVolumeRestore(data.Restore, data.Pod, data.BackupLocation, volume, snapshot, repoID, pvc)
-
 		if err := errorOnly(r.veleroClient.VeleroV1().PodVolumeRestores(volumeRestore.Namespace).Create(context.TODO(), volumeRestore, metav1.CreateOptions{})); err != nil {
 			errs = append(errs, errors.WithStack(err))
 			continue

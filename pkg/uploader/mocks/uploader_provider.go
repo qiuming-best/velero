@@ -1,6 +1,8 @@
 package mocks
 
 import (
+	"context"
+
 	"github.com/sirupsen/logrus"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -11,7 +13,7 @@ import (
 type FakeResticBackupExec struct{}
 
 // RunBackup runs a Restic backup.
-func (exec FakeResticBackupExec) RunBackup(cmd *command.Command, log logrus.FieldLogger, updateFn func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
+func (exec FakeResticBackupExec) RunBackup(ctx context.Context, cmd *command.Command, log logrus.FieldLogger, updateFn func(velerov1api.PodVolumeOperationProgress, string)) (string, string, error) {
 	return "", "", nil
 }
 

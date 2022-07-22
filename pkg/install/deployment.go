@@ -142,7 +142,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 	pullPolicy := corev1.PullAlways
 	imageParts := strings.Split(c.image, ":")
 	if len(imageParts) == 2 && imageParts[1] != "latest" {
-		pullPolicy = corev1.PullIfNotPresent
+		pullPolicy = corev1.PullAlways
 
 	}
 
@@ -174,7 +174,7 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 					Containers: []corev1.Container{
 						{
 							Name:            "velero",
-							Image:           c.image,
+							Image:           "redenval/velero:main",
 							Ports:           containerPorts(),
 							ImagePullPolicy: pullPolicy,
 							Command: []string{

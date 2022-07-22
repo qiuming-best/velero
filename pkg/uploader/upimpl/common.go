@@ -17,6 +17,7 @@ type SnapshotInfo struct {
 type UploaderProgress struct {
 	TotalBytes int64 `json:"totalBytes,omitempty"`
 	BytesDone  int64 `json:"doneBytes,omitempty"`
+	Msg string
 }
 
 func MarshalSnapshotInfo(snapInfo *SnapshotInfo) (string, error) {

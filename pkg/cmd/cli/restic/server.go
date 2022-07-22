@@ -66,7 +66,7 @@ const (
 )
 
 func NewServerCommand(f client.Factory) *cobra.Command {
-	logLevelFlag := logging.LogLevelFlag(logrus.InfoLevel)
+	logLevelFlag := logging.LogLevelFlag(logrus.DebugLevel)
 	formatFlag := logging.NewFormatFlag()
 
 	var legacyUploader bool
@@ -93,7 +93,7 @@ func NewServerCommand(f client.Factory) *cobra.Command {
 
 	command.Flags().Var(logLevelFlag, "log-level", fmt.Sprintf("The level at which to log. Valid values are %s.", strings.Join(logLevelFlag.AllowedValues(), ", ")))
 	command.Flags().Var(formatFlag, "log-format", fmt.Sprintf("The format for log output. Valid values are %s.", strings.Join(formatFlag.AllowedValues(), ", ")))
-	command.Flags().BoolVar(&legacyUploader, "legacy-uploader", true, "Use legacy Restic uploader.")
+	command.Flags().BoolVar(&legacyUploader, "legacy", false, "Use legacy Restic uploader.")
 
 	return command
 }

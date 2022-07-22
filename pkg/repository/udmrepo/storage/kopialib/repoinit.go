@@ -3,6 +3,7 @@ package kopialib
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -103,7 +104,7 @@ func ConnectBackupRepo(ctx context.Context, repoOption udmrepo.RepoOptions, outp
 
 	st, err := options.storageFlags.Connect(ctx, false, genOptions.RepoVersion)
 	if err != nil {
-		return errors.Wrap(err, "Failed to connect to storage")
+		return errors.Wrap(err, fmt.Sprintf("Failed to connect to storage %v", genOptions))
 	}
 
 	return connectWithStorage(ctx, st, genOptions, outputConfigFile)
@@ -165,7 +166,7 @@ func createWithStorage(ctx context.Context, st blob.Storage, genOptions genKopia
 
 func connectWithStorage(ctx context.Context, st blob.Storage, genOptions genKopiaOptions, outputConfigFile string) error {
 	if err := repo.Connect(ctx, outputConfigFile, st, genOptions.Password, newRepoConnectOptions(genOptions)); err != nil {
-		return errors.Wrap(err, "error connecting to repository")
+		return errors.Wrap(err, fmt.Sprintf("error connecting to repository"))
 	}
 
 	return nil

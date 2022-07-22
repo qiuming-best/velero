@@ -39,7 +39,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 	pullPolicy := corev1.PullAlways
 	imageParts := strings.Split(c.image, ":")
 	if len(imageParts) == 2 && imageParts[1] != "latest" {
-		pullPolicy = corev1.PullIfNotPresent
+		pullPolicy = corev1.PullAlways
 
 	}
 
@@ -97,7 +97,7 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 					Containers: []corev1.Container{
 						{
 							Name:            "restic",
-							Image:           c.image,
+							Image:           "redenval/velero:main",
 							ImagePullPolicy: pullPolicy,
 							Command: []string{
 								"/velero",

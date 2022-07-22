@@ -100,6 +100,8 @@ type BackupRepo interface {
 
 	///Close the backup repository
 	Close() error
+
+	//NewWriter(ctx context.Context, option repo.WriteSessionOptions) (context.Context, repo.RepositoryWriter, error)
 }
 
 type ObjectReader interface {
@@ -114,8 +116,10 @@ type ObjectWriter interface {
 	io.WriteCloser
 
 	///For some cases, i.e. block incremental, the object is not written sequentially
-	io.Seeker
-
+	//io.Seeker
+	// Checkpoint returns object ID which represents portion of the object that has already been written.
+	// The result may be an empty object ID if nothing has been flushed yet.
+	Checkpoint() (ID, error)
 	///Wait for the completion of the object write
 	///Result returns the object's unified identifier after the write completes
 	Result() (ID, error)

@@ -36,17 +36,21 @@ type UploaderProvider interface {
 	GetSnapshotID() (string, error)
 
 	RunBackup(
+		ctx context.Context,
 		path string,
 		tags map[string]string,
 		parentSnapshot string,
-		updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error)
+		updateFunc func(velerov1api.PodVolumeOperationProgress, string)) (string, string, error)
 
 	RunRestore(
+		ctx context.Context,
 		snapshotID string,
 		volumePath string,
 		updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error)
 
 	GetTaskName() string
+
+	Cancel()
 
 	Close()
 }
@@ -62,6 +66,7 @@ func NewUploaderProvider(
 	kbClient kbclient.Client,
 	configFile string,
 	log logrus.FieldLogger,
+	action string,
 ) (UploaderProvider, error) {
 	err := ensureRepoConnect(ctx, namespace, kbClient, credentialsFileStore, log, legacyUploader, repoIdentifier, backupStorageLocation.Name)
 	if err != nil {
@@ -71,7 +76,7 @@ func NewUploaderProvider(
 	if legacyUploader {
 		return NewResticUploaderProvider(repoIdentifier, backupStorageLocation, credentialsFileStore, repoKeySelector, log)
 	} else {
-		return NewKopiaUploaderProvider(ctx, repoIdentifier, credentialsFileStore, repoKeySelector, configFile, log)
+		return NewKopiaUploaderProvider(ctx, repoIdentifier, credentialsFileStore, repoKeySelector, configFile, log, action)
 	}
 }
 

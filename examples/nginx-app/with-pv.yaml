@@ -35,7 +35,7 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 50Mi
+      storage: 5Gi
 
 ---
 apiVersion: apps/v1
@@ -52,11 +52,6 @@ spec:
     metadata:
       labels:
         app: nginx
-      annotations:
-        pre.hook.backup.velero.io/container: fsfreeze
-        pre.hook.backup.velero.io/command: '["/sbin/fsfreeze", "--freeze", "/var/log/nginx"]'
-        post.hook.backup.velero.io/container: fsfreeze
-        post.hook.backup.velero.io/command: '["/sbin/fsfreeze", "--unfreeze", "/var/log/nginx"]'
     spec:
       volumes:
         - name: nginx-logs
@@ -71,20 +66,6 @@ spec:
           - mountPath: "/var/log/nginx"
             name: nginx-logs
             readOnly: false
-      - image: ubuntu:bionic
-        name: fsfreeze
-        securityContext:
-          privileged: true
-        volumeMounts:
-          - mountPath: "/var/log/nginx"
-            name: nginx-logs
-            readOnly: false
-        command:
-          - "/bin/bash"
-          - "-c"
-          - "sleep infinity"
-
-  
 ---
 apiVersion: v1
 kind: Service
