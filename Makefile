@@ -21,7 +21,7 @@ BIN ?= velero
 PKG := github.com/vmware-tanzu/velero
 
 # Where to push the docker image.
-REGISTRY ?= velero
+REGISTRY ?= redenval
 
 # Image name
 IMAGE ?= $(REGISTRY)/$(BIN)

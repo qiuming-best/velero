@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-FROM --platform=$BUILDPLATFORM golang:1.17 as builder-env
+FROM --platform=$BUILDPLATFORM harbor-repo.vmware.com/velero_cayman/golang:1.17.11-buster as builder-env
 
 ARG GOPROXY
 ARG PKG
@@ -50,11 +50,12 @@ RUN mkdir -p /output/usr/bin && \
     go build -o /output/${BIN} \
     -ldflags "${LDFLAGS}" ${PKG}/cmd/${BIN}
 
-FROM gcr.io/distroless/base-debian11:nonroot
+#FROM gcr.io/distroless/base-debian11:nonroot
+FROM  busybox
 
 LABEL maintainer="Nolan Brubaker <brubakern@vmware.com>"
 
 COPY --from=builder /output /
 
-USER nonroot:nonroot
+#SER nonroot:nonroot
 

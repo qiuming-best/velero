@@ -136,7 +136,7 @@ type controllerRunInfo struct {
 func NewCommand(f client.Factory) *cobra.Command {
 	var (
 		volumeSnapshotLocations = flag.NewMap().WithKeyValueDelimiter(':')
-		logLevelFlag            = logging.LogLevelFlag(logrus.InfoLevel)
+		logLevelFlag            = logging.LogLevelFlag(logrus.DebugLevel)
 		config                  = serverConfig{
 			pluginDir:                         "/plugins",
 			metricsAddress:                    defaultMetricsAddress,
@@ -222,7 +222,7 @@ func NewCommand(f client.Factory) *cobra.Command {
 	command.Flags().DurationVar(&config.defaultResticMaintenanceFrequency, "default-restic-prune-frequency", config.defaultResticMaintenanceFrequency, "How often 'restic prune' is run for restic repositories by default.")
 	command.Flags().DurationVar(&config.garbageCollectionFrequency, "garbage-collection-frequency", config.garbageCollectionFrequency, "How often garbage collection is run for expired backups.")
 	command.Flags().BoolVar(&config.defaultVolumesToRestic, "default-volumes-to-restic", config.defaultVolumesToRestic, "Backup all volumes with restic by default.")
-	command.Flags().BoolVar(&config.legacyRepo, "legacy-repo", true, "Use legacy Restic repository.")
+	command.Flags().BoolVar(&config.legacyRepo, "legacy", false, "Use legacy Restic repository.")
 
 	return command
 }

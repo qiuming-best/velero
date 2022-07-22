@@ -261,20 +261,19 @@ func (urp *unifiedRepoProvider) getRepoOption(repoID string, repoName string, ba
 	}
 
 	//connection.GetInsecureSkipTLSVerifyFromBSL(loc, log)
-
 	generalOptionStr := `{"storage":"` + storage + `", "password":"` + urp.repoPassword + `"}`
-
-	bucket := ""
-	region := ""
-	endpoint := ""
-	accessKey := ""
-	secret := ""
-	prefix := repoName + "/"
+	bucket := "velero-e2e-testing"
+	region := "minio"
+	endpoint := "minio.minio.svc:9000"
+	accessKey := "minio"
+	secret := "minio456"
+	//SessionToken := os.Getenv("sessionToken")
+	prefix := "unified-repo/" + repoName + "/"
 	storageOptionStr := `{"bucket":"` + bucket + `",
-	"Region":"` + region + `", "endpoint":"` + endpoint + `", "prefix":"` + prefix + `", 
-	"accessKeyID":"` + accessKey + `", "secretAccessKey":"` + secret + `", "doNotUseTLS":true}`
+	"Region":"` + region + `", "endpoint":"` + endpoint + `", "prefix":"` + prefix + `",
+	"accessKeyID":"` + accessKey + `", "secretAccessKey":"` + secret + `","doNotUseTLS":true}`
 
-	log.Infof("Init repo param: repo name %s, storage option [%s]", repoName, storageOptionStr)
+	log.Infof("Init repo param: repo name %s, storage option [%s], general Option [%s]", repoName, storageOptionStr, generalOptionStr)
 
 	return udmrepo.RepoOptions{
 		GeneralOptions: string(generalOptionStr),
