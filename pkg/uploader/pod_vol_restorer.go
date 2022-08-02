@@ -45,7 +45,7 @@ type RestoreData struct {
 // Restorer can execute restic restores of volumes in a pod.
 type Restorer interface {
 	// RestorePodVolumes restores all annotated volumes in a pod.
-	RestorePodVolumes(RestoreData) []error
+	RestorePodVolumes(logrus.FieldLogger, RestoreData) []error
 }
 
 type restorer struct {
@@ -61,16 +61,17 @@ type restorer struct {
 func newRestorer(
 	ctx context.Context,
 	rm repository.RepositoryManager,
+	veleroClient clientset.Interface,
 	podVolumeRestoreInformer cache.SharedIndexInformer,
 	pvcClient corev1client.PersistentVolumeClaimsGetter,
 	log logrus.FieldLogger,
 ) *restorer {
 	r := &restorer{
-		ctx:         ctx,
-		repoManager: rm,
-		pvcClient:   pvcClient,
-
-		results: make(map[string]chan *velerov1api.PodVolumeRestore),
+		ctx:          ctx,
+		repoManager:  rm,
+		pvcClient:    pvcClient,
+		veleroClient: veleroClient,
+		results:      make(map[string]chan *velerov1api.PodVolumeRestore),
 	}
 
 	podVolumeRestoreInformer.AddEventHandler(
@@ -96,14 +97,17 @@ func newRestorer(
 	return r
 }
 
-func (r *restorer) RestorePodVolumes(data RestoreData) []error {
+func (r *restorer) RestorePodVolumes(log logrus.FieldLogger, data RestoreData) []error {
+	log.Infof("vae RestorePodVolumes")
 	volumesToRestore := GetVolumeBackupsForPod(data.PodVolumeBackups, data.Pod, data.SourceNamespace)
 	if len(volumesToRestore) == 0 {
+		log.Infof("vae RestorePodVolumes empty")
 		return nil
 	}
 
 	repoName, repoID, err := r.repoManager.EnsureRepo(r.ctx, data.Restore.Namespace, data.SourceNamespace, data.BackupLocation)
 	if err != nil {
+		log.Errorf("vae RestorePodVolumes empty %v), err")
 		return []error{err}
 	}
 
@@ -128,6 +132,7 @@ func (r *restorer) RestorePodVolumes(data RestoreData) []error {
 	for _, podVolume := range data.Pod.Spec.Volumes {
 		podVolumes[podVolume.Name] = podVolume
 	}
+	log.Infof("vae RestorePodVolumes %v, %d", podVolumes, len(podVolumes))
 	for volume, snapshot := range volumesToRestore {
 		volumeObj, ok := podVolumes[volume]
 		var pvc *corev1api.PersistentVolumeClaim
@@ -144,9 +149,11 @@ func (r *restorer) RestorePodVolumes(data RestoreData) []error {
 		volumeRestore := newPodVolumeRestore(data.Restore, data.Pod, data.BackupLocation, volume, snapshot, repoID, pvc)
 
 		if err := errorOnly(r.veleroClient.VeleroV1().PodVolumeRestores(volumeRestore.Namespace).Create(context.TODO(), volumeRestore, metav1.CreateOptions{})); err != nil {
+			log.Info("vae create PodVolumeRestores with err %v", err)
 			errs = append(errs, errors.WithStack(err))
 			continue
 		}
+		log.Info("vae create PodVolumeRestores")
 		numRestores++
 	}
 

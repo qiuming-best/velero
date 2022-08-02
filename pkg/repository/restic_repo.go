@@ -75,14 +75,14 @@ func (rp *resticRepoProvider) Forget(repoID, snapshotID, backupLocation string) 
 }
 
 func (rp *resticRepoProvider) exec(cmd *command.Command, backupLocation string) error {
-	file, err := rp.credentialsFileStore.Path(RepoKeySelector())
+	credsFile, err := rp.credentialsFileStore.Path(RepoKeySelector())
 	if err != nil {
 		return err
 	}
 	// ignore error since there's nothing we can do and it's a temp file.
-	defer os.Remove(file)
+	defer os.Remove(credsFile)
 
-	cmd.PasswordFile = file
+	cmd.PasswordFile = credsFile
 
 	loc := &velerov1api.BackupStorageLocation{}
 	if err := rp.kbClient.Get(context.Background(), kbclient.ObjectKey{

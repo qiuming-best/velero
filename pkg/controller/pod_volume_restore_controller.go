@@ -270,14 +270,14 @@ func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *ve
 	var uploaderProv uploader.UploaderProvider
 	uploaderProv, err = uploader.NewUploaderProvider(
 		c.ctx, c.legacyUploader, req.Spec.RepoIdentifier, req.Namespace, backupLocation,
-		c.credentialsFileStore, repository.RepoKeySelector(), c.Client, "", log)
+		c.credentialsFileStore, repository.RepoKeySelector(), c.Client, "", log, "restore")
 	if err != nil {
 		return errors.Wrap(err, "error creating uploader")
 	}
 
 	var stdout, stderr string
 
-	if stdout, stderr, err = uploaderProv.RunRestore(req.Spec.SnapshotID, volumePath, c.updateRestoreProgressFunc(req, log)); err != nil {
+	if stdout, stderr, err = uploaderProv.RunRestore(c.ctx, req.Spec.SnapshotID, volumePath, c.updateRestoreProgressFunc(req, log)); err != nil {
 		return errors.Wrapf(err, "error running restic restore, cmd=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
 	}
 	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
@@ -318,6 +318,7 @@ func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *ve
 // the PVR with the new progress
 func (c *PodVolumeRestoreReconciler) updateRestoreProgressFunc(req *velerov1api.PodVolumeRestore, log logrus.FieldLogger) func(velerov1api.PodVolumeOperationProgress) {
 	return func(progress velerov1api.PodVolumeOperationProgress) {
+		log.Infof("vae updateRestoreProgressFunc %v", progress)
 		original := req.DeepCopy()
 		req.Status.Progress = progress
 		if err := kube.Patch(context.Background(), original, req, c.Client); err != nil {

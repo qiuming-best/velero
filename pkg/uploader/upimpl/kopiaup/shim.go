@@ -203,9 +203,8 @@ func (sr *shimObjectWriter) Write(p []byte) (n int, err error) {
 }
 
 func (sr *shimObjectWriter) Checkpoint() (object.ID, error) {
-	// id, err := sr.repoWriter.Checkpoint()
-	// return object.ID(id), err
-	return "", nil
+	id, err := sr.repoWriter.Checkpoint()
+	return object.ID(id), err
 }
 
 func (sr *shimObjectWriter) Result() (object.ID, error) {

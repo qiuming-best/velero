@@ -120,7 +120,7 @@ func (ib *itemBackupper) backupItem(logger logrus.FieldLogger, obj runtime.Unstr
 	}
 	ib.backupRequest.BackedUpItems[key] = struct{}{}
 
-	log.Info("Backing up item")
+	log.Info("vae Backing up item %v %v %v", name, namespace, groupResource)
 
 	log.Debug("Executing pre hooks")
 	if err := ib.itemHookHandler.HandleHooks(log, groupResource, obj, ib.backupRequest.ResourceHooks, hook.PhasePre); err != nil {
@@ -198,8 +198,9 @@ func (ib *itemBackupper) backupItem(logger logrus.FieldLogger, obj runtime.Unstr
 	if groupResource == kuberesource.Pods && pod != nil {
 		// this function will return partial results, so process podVolumeBackups
 		// even if there are errors.
+		log.Debug("vae resticVolumesToBackup %v", resticVolumesToBackup)
 		podVolumeBackups, errs := ib.backupPodVolumes(log, pod, resticVolumesToBackup)
-
+		log.Debug("vae finish resticVolumesToBackup %v", resticVolumesToBackup)
 		ib.backupRequest.PodVolumeBackups = append(ib.backupRequest.PodVolumeBackups, podVolumeBackups...)
 		backupErrs = append(backupErrs, errs...)
 	}
@@ -279,7 +280,7 @@ func (ib *itemBackupper) backupItem(logger logrus.FieldLogger, obj runtime.Unstr
 			return false, errors.WithStack(err)
 		}
 	}
-
+	log.Debugf("vae Finished Resource %s/%s, version= %s, preferredVersion=%s", groupResource.String(), name, version, preferredVersion)
 	return true, nil
 }
 

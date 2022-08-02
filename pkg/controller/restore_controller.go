@@ -191,31 +191,9 @@ func (c *restoreController) processQueueItem(key string) error {
 	if err != nil {
 		return errors.Wrap(err, "error getting Restore")
 	}
-
-	// TODO I think this is now unnecessary. We only initially place
-	// item with Phase = ("" | New) into the queue. Items will only get
-	// re-queued if syncHandler returns an error, which will only
-	// happen if there's an error updating Phase from its initial
-	// state to something else. So any time it's re-queued it will
-	// still have its initial state, which we've already confirmed
-	// is ("" | New)
 	switch restore.Status.Phase {
 	case "", api.RestorePhaseNew:
-	case api.RestorePhaseInProgress:
-		// A restore may stay in-progress forever because of
-		// 1) the controller restarts during the processing of a restore
-		// 2) the restore with in-progress status isn't updated to completed or failed status successfully
-		// So we try to mark such restores as failed to avoid it
-		updated := restore.DeepCopy()
-		updated.Status.Phase = api.RestorePhaseFailed
-		updated.Status.FailureReason = fmt.Sprintf("got a Restore with unexpected status %q, this may be due to a restart of the controller during the restore, mark it as %q",
-			api.RestorePhaseInProgress, updated.Status.Phase)
-		_, err = patchRestore(restore, updated, c.restoreClient)
-		if err != nil {
-			return errors.Wrapf(err, "error updating Restore status to %s", updated.Status.Phase)
-		}
-		log.Warn(updated.Status.FailureReason)
-		return nil
+		// only process new restores
 	default:
 		return nil
 	}
@@ -591,6 +569,8 @@ func putResults(restore *api.Restore, results map[string]pkgrestore.Result, back
 }
 
 func downloadToTempFile(backupName string, backupStore persistence.BackupStore, logger logrus.FieldLogger) (*os.File, error) {
+	log := logger.WithField("backup", backupName)
+	log.Infof("vae downloadToTempFile %v %v", backupName, backupStore)
 	readCloser, err := backupStore.GetBackupContents(backupName)
 	if err != nil {
 		return nil, err
@@ -601,7 +581,7 @@ func downloadToTempFile(backupName string, backupStore persistence.BackupStore, 
 	if err != nil {
 		return nil, errors.Wrap(err, "error creating Backup temp file")
 	}
-
+	log.Infof("vae downloadToTempFile %v", file)
 	n, err := io.Copy(file, readCloser)
 	if err != nil {
 		//Temporary file has been created if we go here. And some problems occurs such as network interruption and
@@ -609,8 +589,6 @@ func downloadToTempFile(backupName string, backupStore persistence.BackupStore, 
 		closeAndRemoveFile(file, logger)
 		return nil, errors.Wrap(err, "error copying Backup to temp file")
 	}
-
-	log := logger.WithField("backup", backupName)
 
 	log.WithFields(logrus.Fields{
 		"fileName": file.Name(),

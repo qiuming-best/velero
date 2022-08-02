@@ -88,20 +88,9 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	switch pvb.Status.Phase {
 	case "", velerov1api.PodVolumeBackupPhaseNew:
-	case velerov1api.PodVolumeBackupPhaseInProgress:
-		original := pvb.DeepCopy()
-		pvb.Status.Phase = velerov1api.PodVolumeBackupPhaseFailed
-		pvb.Status.Message = fmt.Sprintf("got a PodVolumeBackup with unexpected status %q, this may be due to a restart of the controller during the backing up, mark it as %q",
-			velerov1api.PodVolumeBackupPhaseInProgress, pvb.Status.Phase)
-		pvb.Status.CompletionTimestamp = &metav1.Time{Time: r.Clock.Now()}
-		if err := kube.Patch(ctx, original, &pvb, r.Client); err != nil {
-			log.WithError(err).Error("error updating PodVolumeBackup status")
-			return ctrl.Result{}, err
-		}
-		log.Warn(pvb.Status.Message)
-		return ctrl.Result{}, nil
+		// Only process new items.
 	default:
-		log.Debug("PodVolumeBackup is not new or in-progress, not processing")
+		log.Debug("PodVolumeBackup is not new, not processing")
 		return ctrl.Result{}, nil
 	}
 
@@ -150,7 +139,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	var uploaderProv uploader.UploaderProvider
 	uploaderProv, err = uploader.NewUploaderProvider(
 		r.Ctx, r.LegacyUploader, pvb.Spec.RepoIdentifier, pvb.Namespace, backupLocation,
-		r.CredsFileStore, repository.RepoKeySelector(), r.Client, "", log)
+		r.CredsFileStore, repository.RepoKeySelector(), r.Client, "", log, "backup")
 	if err != nil {
 		return r.updateStatusToFailed(ctx, &pvb, err, "error creating uploader", log)
 	}
@@ -174,7 +163,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	var stdout, stderr string
 
 	var emptySnapshot bool
-	if stdout, stderr, err = uploaderProv.RunBackup(path, pvb.Spec.Tags, parentSnapshotID, r.updateBackupProgressFunc(&pvb, log)); err != nil {
+	if stdout, stderr, err = uploaderProv.RunBackup(ctx, path, pvb.Spec.Tags, parentSnapshotID, r.updateBackupProgressFunc(&pvb, log)); err != nil {
 		if strings.Contains(stderr, "snapshot is empty") {
 			emptySnapshot = true
 		} else {
@@ -301,6 +290,7 @@ func (r *PodVolumeBackupReconciler) updateBackupProgressFunc(pvb *velerov1api.Po
 		if err := kube.Patch(context.Background(), original, pvb, r.Client); err != nil {
 			log.WithError(err).Error("error update progress")
 		}
+		log.Infof("vae updateBackupProgressFunc %v \n", progress)
 	}
 }
 

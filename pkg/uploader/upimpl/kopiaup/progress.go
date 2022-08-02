@@ -2,39 +2,59 @@ package kopiaup
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/vmware-tanzu/velero/pkg/uploader/upimpl"
 )
 
-type kopiaProgress struct {
+type Throttle struct {
+	throttle int64
+	interval time.Duration
+}
+
+func (t *Throttle) ShouldOutput() bool {
+	nextOutputTimeUnixNano := atomic.LoadInt64(&t.throttle)
+	if nowNano := time.Now().UnixNano(); nowNano > nextOutputTimeUnixNano { //nolint:forbidigo
+		if atomic.CompareAndSwapInt64(&t.throttle, nextOutputTimeUnixNano, nowNano+t.interval.Nanoseconds()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *KopiaProgress) InitThrottle(interval time.Duration) {
+	p.outputThrottle.throttle = 0
+	p.outputThrottle.interval = interval
+}
+
+type KopiaProgress struct {
 	// all int64 must precede all int32 due to alignment requirements on ARM
 	// +checkatomic
 	uploadedBytes int64
-
+	cachedBytes   int64
+	hashededBytes int64
 	// +checkatomic
 	uploadedFiles int32
-
 	// +checkatomic
 	ignoredErrorCount int32
-
 	// +checkatomic
-	fatalErrorCount int32
-
-	estimatedFileCount int32 // +checklocksignore
-
+	fatalErrorCount     int32
+	estimatedFileCount  int32 // +checklocksignore
 	estimatedTotalBytes int64 // +checklocksignore
-
-	upFunc func(upimpl.UploaderProgress)
+	// +checkatomic
+	processedBytes int64
+	outputThrottle Throttle // is int64
+	UpFunc         func(upimpl.UploaderProgress)
 }
 
-func (p *kopiaProgress) UploadedBytes(numBytes int64) {
+func (p *KopiaProgress) UploadedBytes(numBytes int64) {
 	atomic.AddInt64(&p.uploadedBytes, numBytes)
 	atomic.AddInt32(&p.uploadedFiles, 1)
 
-	p.ShowProgress()
+	p.UpdateProgress()
 }
 
-func (p *kopiaProgress) Error(path string, err error, isIgnored bool) {
+func (p *KopiaProgress) Error(path string, err error, isIgnored bool) {
 	if isIgnored {
 		atomic.AddInt32(&p.ignoredErrorCount, 1)
 	} else {
@@ -42,36 +62,55 @@ func (p *kopiaProgress) Error(path string, err error, isIgnored bool) {
 	}
 }
 
-func (p *kopiaProgress) EstimatedDataSize(fileCount int, totalBytes int64) {
+func (p *KopiaProgress) EstimatedDataSize(fileCount int, totalBytes int64) {
 	atomic.StoreInt64(&p.estimatedTotalBytes, totalBytes)
 	atomic.StoreInt32(&p.estimatedFileCount, int32(fileCount))
 
-	p.ShowProgress()
+	p.UpdateProgress()
 }
 
-func (p *kopiaProgress) ShowProgress() {
-	p.upFunc(upimpl.UploaderProgress{
-		TotalBytes: atomic.LoadInt64(&p.estimatedTotalBytes),
-		BytesDone:  atomic.LoadInt64(&p.uploadedBytes),
-	})
+func (p *KopiaProgress) UpdateProgress() {
+	if p.outputThrottle.ShouldOutput() {
+		p.UpFunc(upimpl.UploaderProgress{
+			TotalBytes: atomic.LoadInt64(&p.estimatedTotalBytes),
+			BytesDone:  atomic.LoadInt64(&p.processedBytes),
+		})
+	}
 }
 
-func (p *kopiaProgress) UploadStarted() {}
+func (p *KopiaProgress) UploadStarted() {}
 
-func (p *kopiaProgress) CachedFile(fname string, numBytes int64) {}
+func (p *KopiaProgress) CachedFile(fname string, numBytes int64) {
+	atomic.AddInt64(&p.cachedBytes, numBytes)
+	p.UpdateProgress()
+}
 
-func (p *kopiaProgress) HashedBytes(numBytes int64) {}
+func (p *KopiaProgress) HashedBytes(numBytes int64) {
+	atomic.AddInt64(&p.processedBytes, numBytes)
+	atomic.AddInt64(&p.hashededBytes, numBytes)
+	p.UpdateProgress()
+}
 
-func (p *kopiaProgress) HashingFile(fname string) {}
+func (p *KopiaProgress) HashingFile(fname string) {}
 
-func (p *kopiaProgress) ExcludedFile(fname string, numBytes int64) {}
+func (p *KopiaProgress) ExcludedFile(fname string, numBytes int64) {}
 
-func (p *kopiaProgress) ExcludedDir(dirname string) {}
+func (p *KopiaProgress) ExcludedDir(dirname string) {}
 
-func (p *kopiaProgress) FinishedHashingFile(fname string, numBytes int64) {}
+func (p *KopiaProgress) FinishedHashingFile(fname string, numBytes int64) {
+	p.UpdateProgress()
+}
 
-func (p *kopiaProgress) StartedDirectory(dirname string) {}
+func (p *KopiaProgress) StartedDirectory(dirname string) {}
 
-func (p *kopiaProgress) FinishedDirectory(dirname string) {}
+func (p *KopiaProgress) FinishedDirectory(dirname string) {
+	p.UpdateProgress()
+}
 
-func (p *kopiaProgress) UploadFinished() {}
+func (p *KopiaProgress) UploadFinished() {}
+
+func (p *KopiaProgress) ProgressBytes(processedBytes int64, totalBytes int64) {
+	atomic.StoreInt64(&p.processedBytes, processedBytes)
+	atomic.StoreInt64(&p.estimatedTotalBytes, totalBytes)
+	p.UpdateProgress()
+}

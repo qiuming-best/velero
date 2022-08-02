@@ -3,7 +3,9 @@ package uploader
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"github.com/kopia/kopia/snapshot/snapshotfs"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 
@@ -18,12 +20,14 @@ import (
 )
 
 type kopiaUploaderProvider struct {
-	ctx            context.Context
+	action         string
 	repoIdentifier string
 	bkRepo         udmrepo.BackupRepo
 	snapshotInfo   *upimpl.SnapshotInfo
 	taskName       string
 	log            logrus.FieldLogger
+	uploader       *snapshotfs.Uploader
+	restoreCancel  chan struct{}
 }
 
 func NewKopiaUploaderProvider(
@@ -33,13 +37,15 @@ func NewKopiaUploaderProvider(
 	repoKeySelector *v1.SecretKeySelector,
 	configFile string,
 	log logrus.FieldLogger,
+	action string,
 ) (UploaderProvider, error) {
 	kup := kopiaUploaderProvider{
 		repoIdentifier: repoIdentifier,
 		log:            log,
+		action:         action,
 	}
 
-	kup.ctx = logging.SetupKopiaLog(ctx, log)
+	ctx = logging.SetupKopiaLog(ctx, log)
 
 	buf, err := credentialsFileStore.Buffer(repoKeySelector)
 	if err != nil {
@@ -67,6 +73,20 @@ func NewKopiaUploaderProvider(
 	return &kup, nil
 }
 
+func (kup *kopiaUploaderProvider) Cancel() {
+	if kup.action == "backup" {
+		kup.uploader.Cancel()
+	} else {
+		if kup.restoreCancel != nil {
+			kup.log.Error("vae restoreCancle is close")
+			close(kup.restoreCancel)
+		} else {
+			kup.log.Error("vae restoreCancle is nil")
+		}
+
+	}
+}
+
 func (kup *kopiaUploaderProvider) Close() {
 	kup.bkRepo.Close()
 }
@@ -76,22 +96,32 @@ func (kup *kopiaUploaderProvider) GetSnapshotID() (string, error) {
 }
 
 func (kup *kopiaUploaderProvider) RunBackup(
+	ctx context.Context,
 	path string,
 	tags map[string]string,
 	parentSnapshot string,
 	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
-
 	kup.taskName = "Kopia-Backup"
+	repoWriter := kopiaup.NewShimRepo(kup.bkRepo)
+	kup.uploader = snapshotfs.NewUploader(repoWriter)
 
+	prorgess := new(kopiaup.KopiaProgress)
+	prorgess.InitThrottle(backupProgressCheckInterval)
+	prorgess.UpFunc = func(p upimpl.UploaderProgress) {
+		updateFunc(velerov1api.PodVolumeOperationProgress{
+			TotalBytes: p.TotalBytes,
+			BytesDone:  p.BytesDone,
+		})
+	}
+	ctx = logging.SetupKopiaLog(ctx, kup.log)
 	log := kup.log.WithFields(logrus.Fields{
 		"path":           path,
 		"parentSnapshot": parentSnapshot,
 		"taskName":       kup.taskName,
 	})
-
+	kup.uploader.Progress = prorgess
 	log.Info("Starting backup")
-
-	snapshotInfo, err := kopiaup.Backup(kup.ctx, path, kup.bkRepo, parentSnapshot, kup.log, func(p upimpl.UploaderProgress) {
+	snapshotInfo, err := kopiaup.Backup(ctx, kup.uploader, repoWriter, path, parentSnapshot, kup.log, func(p upimpl.UploaderProgress) {
 		updateFunc(velerov1api.PodVolumeOperationProgress{
 			TotalBytes: p.TotalBytes,
 			BytesDone:  p.BytesDone,
@@ -108,30 +138,38 @@ func (kup *kopiaUploaderProvider) RunBackup(
 	output := fmt.Sprintf("Kopia backup finished, snapshot ID %s, backup size %d", snapshotInfo.ID, snapshotInfo.Size)
 
 	log.Info(output)
-
+	updateFunc(velerov1api.PodVolumeOperationProgress{
+		TotalBytes: snapshotInfo.Size,
+		BytesDone:  snapshotInfo.Size,
+	})
 	return output, "", nil
 }
 
 func (kup *kopiaUploaderProvider) RunRestore(
+	ctx context.Context,
 	snapshotID string,
 	volumePath string,
 	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
 
 	kup.taskName = "Kopia-Restore"
-
+	ctx = logging.SetupKopiaLog(ctx, kup.log)
 	log := kup.log.WithFields(logrus.Fields{
 		"snapshotID": snapshotID,
 		"volumePath": volumePath,
 	})
-
-	log.Info("Starting restore")
-
-	size, fileCount, err := kopiaup.Restore(kup.ctx, kup.bkRepo, snapshotID, volumePath, kup.log, func(p upimpl.UploaderProgress) {
+	repoWriter := kopiaup.NewShimRepo(kup.bkRepo)
+	prorgess := new(kopiaup.KopiaProgress)
+	prorgess.InitThrottle(time.Second)
+	prorgess.UpFunc = func(p upimpl.UploaderProgress) {
 		updateFunc(velerov1api.PodVolumeOperationProgress{
 			TotalBytes: p.TotalBytes,
 			BytesDone:  p.BytesDone,
 		})
-	})
+	}
+
+	log.Info("Starting restore")
+
+	size, fileCount, err := kopiaup.Restore(ctx, repoWriter, prorgess, snapshotID, volumePath, kup.log, kup.restoreCancel)
 
 	if err != nil {
 		log.WithError(err).Error("Failed to run kopia restore")

@@ -2,6 +2,7 @@ package uploader
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -116,6 +117,7 @@ func (rup *resticUploaderProvider) GetSnapshotID() (string, error) {
 // RunBackup runs a `backup` command and watches the output to provide
 // progress updates to the caller.
 func (rup *resticUploaderProvider) RunBackup(
+	ctx context.Context,
 	path string,
 	tags map[string]string,
 	parentSnapshot string,
@@ -201,10 +203,10 @@ func (rup *resticUploaderProvider) RunBackup(
 	}
 
 	// update progress to 100%
-	updateFunc(velerov1api.PodVolumeOperationProgress{
+	/*updateFunc(velerov1api.PodVolumeOperationProgress{
 		TotalBytes: stat.TotalBytesProcessed,
 		BytesDone:  stat.TotalBytesProcessed,
-	})
+	})*/
 
 	return string(summary), stderrBuf.String(), nil
 }
@@ -213,9 +215,13 @@ func (rup *resticUploaderProvider) GetTaskName() string {
 	return rup.taskName
 }
 
+func (rup *resticUploaderProvider) Cancel() {
+}
+
 // RunRestore runs a `restore` command and monitors the volume size to
 // provide progress updates to the caller.
 func (rup *resticUploaderProvider) RunRestore(
+	ctx context.Context,
 	snapshotID string,
 	volumePath string,
 	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {

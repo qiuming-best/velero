@@ -909,7 +909,9 @@ func getResourceID(groupResource schema.GroupResource, namespace, name string) s
 func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupResource schema.GroupResource, namespace string) (Result, Result) {
 	warnings, errs := Result{}, Result{}
 	resourceID := getResourceID(groupResource, namespace, obj.GetName())
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource1 %v", groupResource.String())
+	}
 	// Check if group/resource should be restored. We need to do this here since
 	// this method may be getting called for an additional item which is a group/resource
 	// that's excluded.
@@ -921,7 +923,9 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		}).Info("Not restoring item because resource is excluded")
 		return warnings, errs
 	}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource2 %v", groupResource.String())
+	}
 	// Check if namespace/cluster-scoped resource should be restored. We need
 	// to do this here since this method may be getting called for an additional
 	// item which is in a namespace that's excluded, or which is cluster-scoped
@@ -966,7 +970,9 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			return warnings, errs
 		}
 	}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource3 %v", groupResource.String())
+	}
 	// Make a copy of object retrieved from backup to make it available unchanged
 	//inside restore actions.
 	itemFromBackup := obj.DeepCopy()
@@ -994,20 +1000,26 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 		return warnings, errs
 	}
 	ctx.restoredItems[itemKey] = struct{}{}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource4 %v", groupResource.String())
+	}
 	// TODO: move to restore item action if/when we add a ShouldRestore() method
 	// to the interface.
 	if groupResource == kuberesource.Pods && obj.GetAnnotations()[v1.MirrorPodAnnotationKey] != "" {
 		ctx.log.Infof("Not restoring pod because it's a mirror pod")
 		return warnings, errs
 	}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource5 %v", groupResource.String())
+	}
 	resourceClient, err := ctx.getResourceClient(groupResource, obj, namespace)
 	if err != nil {
 		errs.AddVeleroError(fmt.Errorf("error getting resource client for namespace %q, resource %q: %v", namespace, &groupResource, err))
 		return warnings, errs
 	}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource6 %v", groupResource.String())
+	}
 	if groupResource == kuberesource.PersistentVolumes {
 		switch {
 		case hasSnapshot(name, ctx.volumeSnapshots):
@@ -1135,7 +1147,9 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	}
 
 	ctx.log.Infof("restore status includes excludes: %+v", ctx.resourceStatusIncludesExcludes)
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource7 %v", groupResource.String())
+	}
 	for _, action := range ctx.getApplicableActions(groupResource, namespace) {
 		if !action.Selector.Matches(labels.Set(obj.GetLabels())) {
 			continue
@@ -1246,6 +1260,9 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	addRestoreLabels(obj, ctx.restore.Name, ctx.restore.Spec.BackupName)
 
 	ctx.log.Infof("Attempting to restore %s: %v", obj.GroupVersionKind().Kind, name)
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource A %v", groupResource.String())
+	}
 	createdObj, restoreErr := resourceClient.Create(obj)
 	isAlreadyExistsError, err := isAlreadyExistsError(ctx, obj, restoreErr, resourceClient)
 	if err != nil {
@@ -1386,11 +1403,16 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 	}
 
 	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource8 %v", groupResource.String())
+	}
+	if groupResource == kuberesource.Pods {
 		pod := new(v1.Pod)
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.UnstructuredContent(), pod); err != nil {
 			errs.Add(namespace, err)
 			return warnings, errs
 		}
+		ctx.log.Infof("vae restore pod %v %v %v", ctx.resourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()),
+			ctx.resourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumes.String()), len(uploader.GetVolumeBackupsForPod(ctx.podVolumeBackups, pod, originalNamespace)))
 
 		// Do not create podvolumerestore when current restore excludes pv/pvc
 		if ctx.resourceIncludesExcludes.ShouldInclude(kuberesource.PersistentVolumeClaims.String()) &&
@@ -1399,11 +1421,13 @@ func (ctx *restoreContext) restoreItem(obj *unstructured.Unstructured, groupReso
 			restorePodVolumeBackups(ctx, createdObj, originalNamespace)
 		}
 	}
-
+	ctx.log.Infof("vae restore pod3")
 	if groupResource == kuberesource.Pods {
 		ctx.waitExec(createdObj)
 	}
-
+	if groupResource == kuberesource.Pods {
+		ctx.log.Infof("vae restoreItem groupResource9 %v", groupResource.String())
+	}
 	// Wait for a CRD to be available for instantiating resources
 	// before continuing.
 	if groupResource == kuberesource.CustomResourceDefinitions {
@@ -1534,6 +1558,7 @@ func remapClaimRefNS(ctx *restoreContext, obj *unstructured.Unstructured) (bool,
 
 // restorePodVolumeBackups restores the PodVolumeBackups for the given restored pod
 func restorePodVolumeBackups(ctx *restoreContext, createdObj *unstructured.Unstructured, originalNamespace string) {
+	ctx.log.Infof("vae restorePodVolumeBackups")
 	if ctx.resticRestorer == nil {
 		ctx.log.Warn("No restic restorer, not restoring pod's volumes")
 	} else {
@@ -1557,7 +1582,8 @@ func restorePodVolumeBackups(ctx *restoreContext, createdObj *unstructured.Unstr
 				SourceNamespace:  originalNamespace,
 				BackupLocation:   ctx.backup.Spec.StorageLocation,
 			}
-			if errs := ctx.resticRestorer.RestorePodVolumes(data); errs != nil {
+			if errs := ctx.resticRestorer.RestorePodVolumes(ctx.log, data); errs != nil {
+				ctx.log.Warn("vae unable to successfully complete restic restores of pod's volumes %v", errs)
 				ctx.log.WithError(kubeerrs.NewAggregate(errs)).Error("unable to successfully complete restic restores of pod's volumes")
 
 				for _, err := range errs {

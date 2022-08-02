@@ -110,7 +110,7 @@ func (up *podVolumeBackupManager) NewRestorer(ctx context.Context, restore *vele
 		},
 	)
 
-	r := newRestorer(ctx, up.repoManager, informer, up.pvcClient, up.log)
+	r := newRestorer(ctx, up.repoManager, up.veleroClient, informer, up.pvcClient, up.log)
 
 	go informer.Run(ctx.Done())
 	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced, up.repoManager.GetRepoInformerSynced()) {

@@ -208,6 +208,8 @@ endif
 	--build-arg=RESTIC_VERSION=$(RESTIC_VERSION) \
 	-f $(VELERO_DOCKERFILE) .
 	@echo "container: $(IMAGE):$(VERSION)"
+	@docker push $(IMAGE):$(VERSION)
+	@docker system prune -f
 
 SKIP_TESTS ?=
 test: build-dirs

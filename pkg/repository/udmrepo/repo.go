@@ -115,7 +115,7 @@ type ObjectWriter interface {
 
 	///For some cases, i.e. block incremental, the object is not written sequentially
 	io.Seeker
-
+	Checkpoint() (ID, error)
 	///Wait for the completion of the object write
 	///Result returns the object's unified identifier after the write completes
 	Result() (ID, error)

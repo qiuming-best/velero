@@ -264,7 +264,7 @@ func (urp *unifiedRepoProvider) getRepoOption(repoID string, repoName string, ba
 	generalOptionStr := `{"storage":"` + storage + `", "password":"` + urp.repoPassword + `"}`
 	bucket := "velero-e2e-testing"
 	region := "minio"
-	endpoint := "minio.minio.svc:9000"
+	endpoint := "34.135.105.45:9000"
 	accessKey := "minio"
 	secret := "minio456"
 	//SessionToken := os.Getenv("sessionToken")

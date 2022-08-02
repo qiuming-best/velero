@@ -252,10 +252,10 @@ func (kow *kopiaObjectWriter) Seek(offset int64, whence int) (int64, error) {
 	return -1, nil
 }
 
-// func (kow *kopiaObjectWriter) Checkpoint() (udmrepo.ID, error) {
-// 	id, err := kow.rawWriter.Checkpoint()
-// 	return udmrepo.ID(id), err
-// }
+func (kow *kopiaObjectWriter) Checkpoint() (udmrepo.ID, error) {
+	id, err := kow.rawWriter.Checkpoint()
+	return udmrepo.ID(id), err
+}
 
 func (kow *kopiaObjectWriter) Result() (udmrepo.ID, error) {
 	id, err := kow.rawWriter.Result()

@@ -2,16 +2,15 @@ package kopiaup
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
-
-	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
-	"github.com/vmware-tanzu/velero/pkg/uploader/upimpl"
 
 	"github.com/kopia/kopia/fs"
 	"github.com/kopia/kopia/fs/localfs"
@@ -22,11 +21,51 @@ import (
 	"github.com/kopia/kopia/snapshot/restore"
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 	"github.com/pkg/errors"
+	"github.com/vmware-tanzu/velero/pkg/uploader/upimpl"
 )
 
-func Backup(ctx context.Context, sourcePath string, dest udmrepo.BackupRepo, parentSnapshot string, log logrus.FieldLogger, upFunc func(upimpl.UploaderProgress)) (*upimpl.SnapshotInfo, error) {
-	rep := NewShimRepo(dest)
+const MaxParallelFileReads = 4
+const ParallelWorkersRestore = 1
 
+var treeForSourceFunc = policy.TreeForSource
+var applyRetentionPolicyFunc = policy.ApplyRetentionPolicy
+var setPolicyFunc = policy.SetPolicy
+var saveSnapshotFunc = snapshot.SaveSnapshot
+var loadSnapshotFunc = snapshot.LoadSnapshot
+
+func newOptionalInt(b policy.OptionalInt) *policy.OptionalInt {
+	return &b
+}
+
+func setupPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snapshot.SourceInfo) {
+	setPolicyFunc(ctx, rep, sourceInfo, &policy.Policy{
+		RetentionPolicy: policy.RetentionPolicy{
+			KeepLatest: newOptionalInt(math.MaxInt32),
+		},
+		CompressionPolicy: policy.CompressionPolicy{
+			CompressorName: "none",
+		},
+		UploadPolicy: policy.UploadPolicy{
+			MaxParallelFileReads: newOptionalInt(MaxParallelFileReads),
+		},
+		SchedulingPolicy: policy.SchedulingPolicy{
+			Manual: true,
+		},
+	})
+}
+
+func getParallelWorksRestore(wokers int) int {
+	maxNum := runtime.NumCPU()
+	if wokers <= 0 || wokers > maxNum {
+		return maxNum
+	}
+	return wokers
+}
+
+func Backup(ctx context.Context, uploader *snapshotfs.Uploader, repoWriter repo.RepositoryWriter, sourcePath string, parentSnapshot string, log logrus.FieldLogger, upFunc func(upimpl.UploaderProgress)) (*upimpl.SnapshotInfo, error) {
+	if uploader == nil {
+		return nil, fmt.Errorf("get empty kopia uploader")
+	}
 	dir, err := filepath.Abs(sourcePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "Invalid source path '%s'", sourcePath)
@@ -37,17 +76,12 @@ func Backup(ctx context.Context, sourcePath string, dest udmrepo.BackupRepo, par
 		Host:     upimpl.GetDefaultHostName(),
 		Path:     filepath.Clean(dir),
 	}
+
 	rootDir, err := getLocalFSEntry(ctx, sourceInfo.Path)
 	if err != nil {
 		return nil, errors.Wrap(err, "Unable to get local filesystem entry")
 	}
-
-	u := snapshotfs.NewUploader(rep)
-	u.Progress = &kopiaProgress{
-		upFunc: upFunc,
-	}
-
-	snapID, snapshotSize, err := SnapshotSource(ctx, rep, u, sourceInfo, rootDir, parentSnapshot, log, "Kopia Uploader")
+	snapID, snapshotSize, err := SnapshotSource(ctx, repoWriter, uploader, sourceInfo, rootDir, parentSnapshot, log, "Kopia Uploader")
 	if err != nil {
 		return nil, err
 	}
@@ -87,10 +121,20 @@ func resolveSymlink(path string) (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
+type SnapshotUploader interface {
+	Upload(
+		ctx context.Context,
+		source fs.Entry,
+		policyTree *policy.Tree,
+		sourceInfo snapshot.SourceInfo,
+		previousManifests ...*snapshot.Manifest,
+	) (*snapshot.Manifest, error)
+}
+
 func SnapshotSource(
 	ctx context.Context,
 	rep repo.RepositoryWriter,
-	u *snapshotfs.Uploader,
+	u SnapshotUploader,
 	sourceInfo snapshot.SourceInfo,
 	rootDir fs.Entry,
 	parentSnapshot string,
@@ -98,17 +142,14 @@ func SnapshotSource(
 	description string,
 ) (string, int64, error) {
 	log.Info("Start to snapshot...")
-
 	snapshotStartTime := time.Now()
-
 	var previous []*snapshot.Manifest
 	if parentSnapshot != "" {
-		mani, err := snapshot.LoadSnapshot(ctx, rep, manifest.ID(parentSnapshot))
+		mani, err := loadSnapshotFunc(ctx, rep, manifest.ID(parentSnapshot))
 		if err != nil {
 			log.WithError(err).Error("Failed to load previous snapshot from kopia")
 			return "", 0, err
 		}
-
 		previous = append(previous, mani)
 	} else {
 		pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, nil)
@@ -116,14 +157,13 @@ func SnapshotSource(
 			log.WithError(err).Error("Failed to find previous kopia snapshot manifests")
 			return "", 0, err
 		}
-
 		previous = pre
 	}
-
-	policyTree, err := policy.TreeForSource(ctx, rep, sourceInfo)
+	setupPolicy(ctx, rep, sourceInfo)
+	policyTree, err := treeForSourceFunc(ctx, rep, sourceInfo)
 	if err != nil {
 		log.Error("Failed to get kopia policy tree")
-		return "", 0, err
+		return "", 0, errors.Wrap(err, "unable to create policy getter")
 	}
 
 	manifest, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
@@ -134,19 +174,14 @@ func SnapshotSource(
 
 	manifest.Description = description
 
-	if _, err = snapshot.SaveSnapshot(ctx, rep, manifest); err != nil {
+	if _, err = saveSnapshotFunc(ctx, rep, manifest); err != nil {
 		log.WithError(err).Error("Failed to save kopia manifest")
 		return "", 0, err
 	}
 
-	_, err = policy.ApplyRetentionPolicy(ctx, rep, sourceInfo, true)
+	_, err = applyRetentionPolicyFunc(ctx, rep, sourceInfo, true)
 	if err != nil {
 		log.WithError(err).Error("Failed to apply kopia retention policy")
-		return "", 0, err
-	}
-
-	if err = policy.SetManual(ctx, rep, sourceInfo); err != nil {
-		log.WithError(err).Error("Failed to set manual field in kopia scheduling policy for source")
 		return "", 0, err
 	}
 
@@ -157,10 +192,10 @@ func SnapshotSource(
 
 	log.Infof("Created snapshot with root %v and ID %v in %v", manifest.RootObjectID(), manifest.ID, time.Since(snapshotStartTime).Truncate(time.Second))
 
-	return reportSnapshotStatus(ctx, snapshotStartTime, manifest)
+	return reportSnapshotStatus(manifest)
 }
 
-func reportSnapshotStatus(ctx context.Context, snapshotStartTime time.Time, manifest *snapshot.Manifest) (string, int64, error) {
+func reportSnapshotStatus(manifest *snapshot.Manifest) (string, int64, error) {
 	manifestID := manifest.ID
 	snapSize := manifest.Stats.TotalFileSize
 
@@ -203,10 +238,8 @@ func findPreviousSnapshotManifest(ctx context.Context, rep repo.Repository, sour
 	return result, nil
 }
 
-func Restore(ctx context.Context, source udmrepo.BackupRepo, snapshotID, dest string, log logrus.FieldLogger, upFunc func(upimpl.UploaderProgress)) (int64, int32, error) {
+func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *KopiaProgress, snapshotID, dest string, log logrus.FieldLogger, cancleCh chan struct{}) (int64, int32, error) {
 	log.Info("Start to restore...")
-
-	rep := NewShimRepo(source)
 
 	rootEntry, err := snapshotfs.FilesystemEntryFromIDWithPath(ctx, rep, snapshotID, false)
 	if err != nil {
@@ -229,13 +262,12 @@ func Restore(ctx context.Context, source udmrepo.BackupRepo, snapshotID, dest st
 	}
 
 	stat, err := restore.Entry(ctx, rep, output, rootEntry, restore.Options{
-		Parallel:               1,
+		Parallel:               getParallelWorksRestore(ParallelWorkersRestore),
 		RestoreDirEntryAtDepth: math.MaxInt32,
+		Cancel:                 cancleCh,
 		ProgressCallback: func(ctx context.Context, stats restore.Stats) {
-			upFunc(upimpl.UploaderProgress{
-				TotalBytes: stats.EnqueuedTotalFileSize,
-				BytesDone:  stats.RestoredTotalFileSize,
-			})
+			log.Debugf("vae updateRestoreProgressFunc %v", stats)
+			progress.ProgressBytes(stats.RestoredTotalFileSize, stats.EnqueuedTotalFileSize)
 		},
 	})
 
@@ -243,6 +275,5 @@ func Restore(ctx context.Context, source udmrepo.BackupRepo, snapshotID, dest st
 		log.WithError(err).Error("Failed to copy snapshot data to the target")
 		return 0, 0, err
 	}
-
 	return stat.RestoredTotalFileSize, stat.RestoredFileCount, nil
 }

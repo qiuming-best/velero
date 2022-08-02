@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -52,7 +51,6 @@ type backupper struct {
 	pvClient     corev1client.PersistentVolumesGetter
 
 	results     map[string]chan *velerov1api.PodVolumeBackup
-	started     map[string]chan struct{}
 	resultsLock sync.Mutex
 }
 
@@ -73,14 +71,13 @@ func newBackupper(
 		pvClient:     pvClient,
 
 		results: make(map[string]chan *velerov1api.PodVolumeBackup),
-		started: make(map[string]chan struct{}),
 	}
 
 	podVolumeBackupInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			UpdateFunc: func(_, obj interface{}) {
 				pvb := obj.(*velerov1api.PodVolumeBackup)
-
+				log.Infof("vae Update %v %v %v", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Status.Phase)
 				if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseCompleted || pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseFailed {
 					b.resultsLock.Lock()
 					defer b.resultsLock.Unlock()
@@ -90,22 +87,12 @@ func newBackupper(
 						log.Errorf("No results channel found for pod %s/%s to send pod volume backup %s/%s on", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Namespace, pvb.Name)
 						return
 					}
+					log.Infof("vae put into channal %v %v", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name)
 					resChan <- pvb
-				} else if pvb.Status.Phase == velerov1api.PodVolumeBackupPhaseInProgress {
-					b.resultsLock.Lock()
-					defer b.resultsLock.Unlock()
-
-					startedChan, ok := b.started[resultsKey(pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name)]
-					if !ok {
-						log.Errorf("No started channel found for pod %s/%s to send pod volume backup %s/%s on", pvb.Spec.Pod.Namespace, pvb.Spec.Pod.Name, pvb.Namespace, pvb.Name)
-						return
-					}
-					startedChan <- struct{}{}
 				}
 			},
 		},
 	)
-
 	return b
 }
 
@@ -129,11 +116,9 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 	defer b.repoManager.UnlockRepoShared(repoName)
 
 	resultsChan := make(chan *velerov1api.PodVolumeBackup)
-	startedChan := make(chan struct{}, len(volumesToBackup))
 
 	b.resultsLock.Lock()
 	b.results[resultsKey(pod.Namespace, pod.Name)] = resultsChan
-	b.started[resultsKey(pod.Namespace, pod.Name)] = startedChan
 	b.resultsLock.Unlock()
 
 	var (
@@ -196,7 +181,7 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 		}
 
 		volumeBackup := newPodVolumeBackup(backup, pod, volume, repoID, pvc)
-		if volumeBackup, err = b.veleroClient.VeleroV1().PodVolumeBackups(volumeBackup.Namespace).Create(context.TODO(), volumeBackup, metav1.CreateOptions{}); err != nil {
+		if _, err = b.veleroClient.VeleroV1().PodVolumeBackups(volumeBackup.Namespace).Create(context.TODO(), volumeBackup, metav1.CreateOptions{}); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -205,44 +190,27 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 
 	log.Debug("Wait for PodVolumeBackup start...")
 
-	started := false
-	select {
-	case <-startedChan:
-		started = true
-	case <-time.After(2 * time.Minute):
-		started = false
-	}
-
-	log.Debug("Finished Waitting for PodVolumeBackup start(%t)", started)
-
-	if !started {
-		podVolumeBackups = nil
-		errs = append(errs, errors.New("The PodVolumeBackups have not started until timeout"))
-		log.Error("The PodVolumeBackups have not started until timeout")
-	} else {
-	ForEachVolume:
-		for i, count := 0, numVolumeSnapshots; i < count; i++ {
-			select {
-			case <-b.ctx.Done():
-				errs = append(errs, errors.New("timed out waiting for all PodVolumeBackups to complete"))
-				break ForEachVolume
-			case res := <-resultsChan:
-				switch res.Status.Phase {
-				case velerov1api.PodVolumeBackupPhaseCompleted:
-					podVolumeBackups = append(podVolumeBackups, res)
-				case velerov1api.PodVolumeBackupPhaseFailed:
-					errs = append(errs, errors.Errorf("pod volume backup failed: %s", res.Status.Message))
-					podVolumeBackups = append(podVolumeBackups, res)
-				}
+ForEachVolume:
+	for i, count := 0, numVolumeSnapshots; i < count; i++ {
+		select {
+		case <-b.ctx.Done():
+			errs = append(errs, errors.New("timed out waiting for all PodVolumeBackups to complete"))
+			break ForEachVolume
+		case res := <-resultsChan:
+			switch res.Status.Phase {
+			case velerov1api.PodVolumeBackupPhaseCompleted:
+				podVolumeBackups = append(podVolumeBackups, res)
+			case velerov1api.PodVolumeBackupPhaseFailed:
+				errs = append(errs, errors.Errorf("pod volume backup failed: %s", res.Status.Message))
+				podVolumeBackups = append(podVolumeBackups, res)
 			}
 		}
 	}
 
 	b.resultsLock.Lock()
 	delete(b.results, resultsKey(pod.Namespace, pod.Name))
-	delete(b.started, resultsKey(pod.Namespace, pod.Name))
 	b.resultsLock.Unlock()
-
+	log.Debug("vae Finished Waitting for PodVolumeBackup")
 	return podVolumeBackups, errs
 }
 
