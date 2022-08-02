@@ -46,7 +46,6 @@ func NewKopiaUploaderProvider(
 	}
 
 	ctx = logging.SetupKopiaLog(ctx, log)
-
 	buf, err := credentialsFileStore.Buffer(repoKeySelector)
 	if err != nil {
 		log.WithError(err).Error("Failed to get password buffer")
@@ -61,9 +60,7 @@ func NewKopiaUploaderProvider(
 	}
 
 	repoService := udmreposrv.CreateUdmrepoService(ctx, log)
-
 	log.WithField("configFile", configFile).Info("Opening backup repo")
-
 	kup.bkRepo, err = repoService.OpenBackupRepo(configFile, password)
 	if err != nil {
 		log.WithError(err).Error("Failed to find kopia repository")
@@ -91,6 +88,20 @@ func (kup *kopiaUploaderProvider) Close() {
 	kup.bkRepo.Close()
 }
 
+func (kup *kopiaUploaderProvider) Cancel() {
+	if kup.action == "backup" {
+		kup.uploader.Cancel()
+	} else {
+		if kup.restoreCancle != nil {
+			kup.log.Error("vae restoreCancle is close")
+			close(kup.restoreCancle)
+		} else {
+			kup.log.Error("vae restoreCancle is nil")
+		}
+
+	}
+}
+
 func (kup *kopiaUploaderProvider) GetSnapshotID() (string, error) {
 	return kup.snapshotInfo.ID, nil
 }
@@ -100,7 +111,8 @@ func (kup *kopiaUploaderProvider) RunBackup(
 	path string,
 	tags map[string]string,
 	parentSnapshot string,
-	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
+	updateFunc func(p velerov1api.PodVolumeOperationProgress, msg string)) (string, string, error) {
+
 	kup.taskName = "Kopia-Backup"
 	repoWriter := kopiaup.NewShimRepo(kup.bkRepo)
 	kup.uploader = snapshotfs.NewUploader(repoWriter)
@@ -135,6 +147,10 @@ func (kup *kopiaUploaderProvider) RunBackup(
 
 	kup.snapshotInfo = snapshotInfo
 
+	updateFunc(velerov1api.PodVolumeOperationProgress{
+		TotalBytes: kup.snapshotInfo.Size,
+		BytesDone:  kup.snapshotInfo.Size,
+	}, "vae Finished")
 	output := fmt.Sprintf("Kopia backup finished, snapshot ID %s, backup size %d", snapshotInfo.ID, snapshotInfo.Size)
 
 	log.Info(output)

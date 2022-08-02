@@ -277,11 +277,12 @@ func (c *PodVolumeRestoreReconciler) processRestore(ctx context.Context, req *ve
 
 	var stdout, stderr string
 
-	if stdout, stderr, err = uploaderProv.RunRestore(c.ctx, req.Spec.SnapshotID, volumePath, c.updateRestoreProgressFunc(req, log)); err != nil {
+	if stdout, stderr, err = uploaderProv.RunRestore(ctx, req.Spec.SnapshotID, volumePath, c.updateRestoreProgressFunc(req, log)); err != nil {
 		return errors.Wrapf(err, "error running restic restore, cmd=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
 	}
 	log.Debugf("Ran command=%s, stdout=%s, stderr=%s", uploaderProv.GetTaskName(), stdout, stderr)
-
+	uploaderProv.Cancel()
+	log.Debugf("vae Canceled")
 	// Remove the .velero directory from the restored volume (it may contain done files from previous restores
 	// of this volume, which we don't want to carry over). If this fails for any reason, log and continue, since
 	// this is non-essential cleanup (the done files are named based on restore UID and the init container looks

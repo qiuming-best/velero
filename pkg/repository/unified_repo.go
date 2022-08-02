@@ -270,7 +270,7 @@ func (urp *unifiedRepoProvider) getRepoOption(repoID string, repoName string, ba
 	//SessionToken := os.Getenv("sessionToken")
 	prefix := "unified-repo/" + repoName + "/"
 	storageOptionStr := `{"bucket":"` + bucket + `",
-	"Region":"` + region + `", "endpoint":"` + endpoint + `", "prefix":"` + prefix + `",
+	"Region":"` + region + `", "endpoint":"` + endpoint + `", "prefix":"` + prefix + `", 
 	"accessKeyID":"` + accessKey + `", "secretAccessKey":"` + secret + `","doNotUseTLS":true}`
 
 	log.Infof("Init repo param: repo name %s, storage option [%s], general Option [%s]", repoName, storageOptionStr, generalOptionStr)

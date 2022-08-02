@@ -147,7 +147,6 @@ func (r *restorer) RestorePodVolumes(log logrus.FieldLogger, data RestoreData) [
 		}
 
 		volumeRestore := newPodVolumeRestore(data.Restore, data.Pod, data.BackupLocation, volume, snapshot, repoID, pvc)
-
 		if err := errorOnly(r.veleroClient.VeleroV1().PodVolumeRestores(volumeRestore.Namespace).Create(context.TODO(), volumeRestore, metav1.CreateOptions{})); err != nil {
 			log.Info("vae create PodVolumeRestores with err %v", err)
 			errs = append(errs, errors.WithStack(err))

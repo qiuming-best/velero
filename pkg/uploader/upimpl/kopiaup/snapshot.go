@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apex/log"
 	"github.com/sirupsen/logrus"
 
 	"github.com/kopia/kopia/fs"
@@ -94,7 +95,7 @@ func Backup(ctx context.Context, uploader *snapshotfs.Uploader, repoWriter repo.
 	return snapshotInfo, nil
 }
 
-func getLocalFSEntry(ctx context.Context, path0 string) (fs.Entry, error) {
+func getLocalFSEntry(path0 string) (fs.Entry, error) {
 	path, err := resolveSymlink(path0)
 	if err != nil {
 		return nil, errors.Wrap(err, "resolveSymlink")
@@ -140,6 +141,7 @@ func SnapshotSource(
 	parentSnapshot string,
 	log logrus.FieldLogger,
 	description string,
+	upFunc func(upimpl.UploaderProgress),
 ) (string, int64, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
@@ -165,13 +167,14 @@ func SnapshotSource(
 		log.Error("Failed to get kopia policy tree")
 		return "", 0, errors.Wrap(err, "unable to create policy getter")
 	}
-
-	manifest, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
+	outputPolicy(ctx, rep, sourceInfo)
+	log.Info("Start to snapshot1...")
+	manifest, err = u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
 	if err != nil {
 		log.WithError(err).Error("Failed to upload the kopia snapshot")
 		return "", 0, err
 	}
-
+	log.Info("Start to snapshot2...")
 	manifest.Description = description
 
 	if _, err = saveSnapshotFunc(ctx, rep, manifest); err != nil {
@@ -184,13 +187,26 @@ func SnapshotSource(
 		log.WithError(err).Error("Failed to apply kopia retention policy")
 		return "", 0, err
 	}
-
 	if err = rep.Flush(ctx); err != nil {
 		log.WithError(err).Error("Failed to flush kopia repository")
 		return "", 0, err
 	}
-
+	log.Info("Start to snapshot5...")
+	outputPolicy(ctx, rep, sourceInfo)
 	log.Infof("Created snapshot with root %v and ID %v in %v", manifest.RootObjectID(), manifest.ID, time.Since(snapshotStartTime).Truncate(time.Second))
+	return reportSnapshotStatus(manifest)
+	//}
+
+	//err := repo.WriteSession(ctx, rep, writeSessionOpt, cb)
+	/*err := cb(ctx, rep)
+	if err != nil {
+		return "", 0, err
+	} else if manifest == nil {
+		return "", 0, fmt.Errorf("failed to snapshot data with empty manifest")
+	} else {
+		return reportSnapshotStatus(manifest)
+	}*/
+}
 
 	return reportSnapshotStatus(manifest)
 }

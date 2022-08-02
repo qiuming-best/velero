@@ -202,7 +202,7 @@ func (r *PodVolumeBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	r.Metrics.RegisterResticOpLatencyGauge(r.NodeName, req.Name, uploaderProv.GetTaskName(), backupName, latencySeconds)
 	r.Metrics.RegisterPodVolumeBackupDequeue(r.NodeName)
 
-	log.Info("PodVolumeBackup completed")
+	log.Info("PodVolumeBackup completed with status %v", pvb.Status.Phase)
 	return ctrl.Result{}, nil
 }
 
@@ -283,14 +283,14 @@ func (r *PodVolumeBackupReconciler) getParentSnapshot(ctx context.Context, log l
 
 // updateBackupProgressFunc returns a func that takes progress info and patches
 // the PVB with the new progress.
-func (r *PodVolumeBackupReconciler) updateBackupProgressFunc(pvb *velerov1api.PodVolumeBackup, log logrus.FieldLogger) func(velerov1api.PodVolumeOperationProgress) {
-	return func(progress velerov1api.PodVolumeOperationProgress) {
+func (r *PodVolumeBackupReconciler) updateBackupProgressFunc(pvb *velerov1api.PodVolumeBackup, log logrus.FieldLogger) func(pro velerov1api.PodVolumeOperationProgress, msg string) {
+	return func(progress velerov1api.PodVolumeOperationProgress, mgs string) {
 		original := pvb.DeepCopy()
 		pvb.Status.Progress = progress
 		if err := kube.Patch(context.Background(), original, pvb, r.Client); err != nil {
 			log.WithError(err).Error("error update progress")
 		}
-		log.Infof("vae updateBackupProgressFunc %v \n", progress)
+		log.Infof("vae progress %v %s", progress, mgs)
 	}
 }
 

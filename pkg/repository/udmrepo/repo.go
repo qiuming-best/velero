@@ -100,6 +100,8 @@ type BackupRepo interface {
 
 	///Close the backup repository
 	Close() error
+
+	//NewWriter(ctx context.Context, option repo.WriteSessionOptions) (context.Context, repo.RepositoryWriter, error)
 }
 
 type ObjectReader interface {

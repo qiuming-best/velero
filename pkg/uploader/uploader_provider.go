@@ -40,7 +40,7 @@ type UploaderProvider interface {
 		path string,
 		tags map[string]string,
 		parentSnapshot string,
-		updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error)
+		updateFunc func(velerov1api.PodVolumeOperationProgress, string)) (string, string, error)
 
 	RunRestore(
 		ctx context.Context,
@@ -49,6 +49,8 @@ type UploaderProvider interface {
 		updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error)
 
 	GetTaskName() string
+
+	Cancel()
 
 	Close()
 

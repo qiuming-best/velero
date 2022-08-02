@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
@@ -68,11 +69,15 @@ func (ks *kopiaRepoService) OpenBackupRepo(configFile, password string) (udmrepo
 	if err != nil {
 		return nil, err
 	}
-
 	_, rw, err := r.NewWriter(ks.ctx, repo.WriteSessionOptions{
-		Purpose:  "",
-		OnUpload: func(i int64) {},
+		Purpose: "test",
+		OnUpload: func(i int64) {
+		},
 	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to create writer")
+	}
 
 	return &kopiaRepository{
 		ctx:       ks.ctx,
@@ -175,28 +180,6 @@ func (kr *kopiaRepository) Time() time.Time {
 	return kr.rawWriter.Time()
 }
 
-// func (kr *kopiaRepository) ClientOptions() udmrepo.RepoClientOptions {
-// 	option := kr.rawWriter.ClientOptions()
-// 	return GetClientOptionFromKopia(option)
-// }
-
-// func GetClientOptionFromKopia(option repo.ClientOptions) udmrepo.RepoClientOptions {
-// 	var ret udmrepo.RepoClientOptions
-
-// 	ret.Description = option.Description
-// 	ret.EnableActions = option.EnableActions
-// 	ret.FormatBlobCacheDuration = option.FormatBlobCacheDuration
-// 	ret.Hostname = option.Hostname
-// 	ret.ReadOnly = option.ReadOnly
-// 	ret.Username = option.Username
-
-// 	return ret
-// }
-
-// func (kr *kopiaRepository) Refresh() error {
-// 	return kr.rawWriter.Refresh(kr.ctx)
-// }
-
 func (kr *kopiaRepository) Close() error {
 	return kr.rawWriter.Close(kr.ctx)
 }
@@ -228,6 +211,10 @@ func (kr *kopiaRepository) Flush() error {
 	return kr.rawWriter.Flush(kr.ctx)
 }
 
+/*func (kr *kopiaRepository) NewWriter(ctx context.Context, option repo.WriteSessionOptions) (context.Context, repo.RepositoryWriter, error) {
+	return kr.rawWriter.NewWriter(ctx, option)
+}*/
+
 func (kor *kopiaObjectReader) Read(p []byte) (n int, err error) {
 	return kor.rawReader.Read(p)
 }
@@ -248,9 +235,9 @@ func (kow *kopiaObjectWriter) Write(p []byte) (n int, err error) {
 	return kow.rawWriter.Write(p)
 }
 
-func (kow *kopiaObjectWriter) Seek(offset int64, whence int) (int64, error) {
+/*func (kow *kopiaObjectWriter) Seek(offset int64, whence int) (int64, error) {
 	return -1, nil
-}
+}*/
 
 func (kow *kopiaObjectWriter) Checkpoint() (udmrepo.ID, error) {
 	id, err := kow.rawWriter.Checkpoint()

@@ -2,6 +2,7 @@ package kopiaup
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -52,6 +53,9 @@ func (sr *shimRepository) GetManifest(ctx context.Context, id manifest.ID, paylo
 	}
 
 	err := sr.udmRepo.GetManifest(udmrepo.ID(id), &repoMani)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find manifest id %v from repository with err %v", id, err)
+	}
 	return GetKopiaManifestEntry(repoMani.Metadata), err
 }
 

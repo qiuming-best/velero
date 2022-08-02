@@ -79,6 +79,10 @@ func NewResticUploaderProvider(
 	return &resticUploaderProvider, nil
 }
 
+//Not implement yet
+func (rup *resticUploaderProvider) Cancel() {
+}
+
 func (rup *resticUploaderProvider) Close() {
 	os.Remove(rup.credentialsFile)
 	os.Remove(rup.caCertFile)
@@ -121,7 +125,7 @@ func (rup *resticUploaderProvider) RunBackup(
 	path string,
 	tags map[string]string,
 	parentSnapshot string,
-	updateFunc func(velerov1api.PodVolumeOperationProgress)) (string, string, error) {
+	updateFunc func(velerov1api.PodVolumeOperationProgress, string)) (string, string, error) {
 	// buffers for copying command stdout/err output into
 	stdoutBuf := new(bytes.Buffer)
 	stderrBuf := new(bytes.Buffer)
@@ -174,7 +178,7 @@ func (rup *resticUploaderProvider) RunBackup(
 						updateFunc(velerov1api.PodVolumeOperationProgress{
 							TotalBytes: stat.TotalBytes,
 							BytesDone:  stat.BytesDone,
-						})
+						}, "")
 					}
 				}
 			case <-quit:
