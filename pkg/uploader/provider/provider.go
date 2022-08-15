@@ -18,9 +18,13 @@ package provider
 
 import (
 	"context"
+	"time"
 
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 )
+
+const restoreProgressCheckInterval = 10 * time.Second
+const backupProgressCheckInterval = 10 * time.Second
 
 // Provider which is designed for one pod volumn to do the backup or restore
 type Provider interface {
