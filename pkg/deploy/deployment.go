@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package install
+package deploy
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/builder"
 )
 
-type podTemplateOption func(*podTemplateConfig)
+type PodTemplateOption func(*podTemplateConfig)
 
 type podTemplateConfig struct {
 	image                           string
@@ -47,25 +47,25 @@ type podTemplateConfig struct {
 	uploaderType                    string
 }
 
-func WithImage(image string) podTemplateOption {
+func WithImage(image string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.image = image
 	}
 }
 
-func WithAnnotations(annotations map[string]string) podTemplateOption {
+func WithAnnotations(annotations map[string]string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.annotations = annotations
 	}
 }
 
-func WithLabels(labels map[string]string) podTemplateOption {
+func WithLabels(labels map[string]string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.labels = labels
 	}
 }
 
-func WithEnvFromSecretKey(varName, secret, key string) podTemplateOption {
+func WithEnvFromSecretKey(varName, secret, key string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.envVars = append(c.envVars, corev1.EnvVar{
 			Name: varName,
@@ -81,61 +81,61 @@ func WithEnvFromSecretKey(varName, secret, key string) podTemplateOption {
 	}
 }
 
-func WithSecret(secretPresent bool) podTemplateOption {
+func WithSecret(secretPresent bool) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.withSecret = secretPresent
 	}
 }
 
-func WithRestoreOnly() podTemplateOption {
+func WithRestoreOnly() PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.restoreOnly = true
 	}
 }
 
-func WithResources(resources corev1.ResourceRequirements) podTemplateOption {
+func WithResources(resources corev1.ResourceRequirements) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.resources = resources
 	}
 }
 
-func WithDefaultRepoMaintenanceFrequency(val time.Duration) podTemplateOption {
+func WithDefaultRepoMaintenanceFrequency(val time.Duration) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.defaultRepoMaintenanceFrequency = val
 	}
 }
 
-func WithGarbageCollectionFrequency(val time.Duration) podTemplateOption {
+func WithGarbageCollectionFrequency(val time.Duration) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.garbageCollectionFrequency = val
 	}
 }
 
-func WithPlugins(plugins []string) podTemplateOption {
+func WithPlugins(plugins []string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.plugins = plugins
 	}
 }
 
-func WithFeatures(features []string) podTemplateOption {
+func WithFeatures(features []string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.features = features
 	}
 }
 
-func WithUploaderType(t string) podTemplateOption {
+func WithUploaderType(t string) PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.uploaderType = t
 	}
 }
 
-func WithDefaultVolumesToFsBackup() podTemplateOption {
+func WithDefaultVolumesToFsBackup() PodTemplateOption {
 	return func(c *podTemplateConfig) {
 		c.defaultVolumesToFsBackup = true
 	}
 }
 
-func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment {
+func Deployment(namespace string, opts ...PodTemplateOption) *appsv1.Deployment {
 	// TODO: Add support for server args
 	c := &podTemplateConfig{
 		image: velero.DefaultVeleroImage(),
@@ -305,4 +305,33 @@ func Deployment(namespace string, opts ...podTemplateOption) *appsv1.Deployment 
 	}
 
 	return deployment
+}
+
+func PatchDeployment(serverVersion string, deploy *appsv1.Deployment, opts ...PodTemplateOption) *appsv1.Deployment {
+	c := &podTemplateConfig{
+		image: velero.DefaultVeleroImage(),
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	if serverVersion > "v1.9" {
+		args := []string{"server"}
+		if len(c.features) > 0 {
+			args = append(args, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
+		}
+
+		if c.defaultVolumesToFsBackup {
+			args = append(args, "--default-volumes-to-fs-backup=true")
+		}
+
+		if len(c.uploaderType) > 0 {
+			args = append(args, fmt.Sprintf("--uploader-type=%s", c.uploaderType))
+		}
+
+		deploy.Spec.Template.Spec.Containers[0].Args = args
+	}
+
+	deploy.Spec.Template.Spec.Containers[0].Image = c.image
+
+	return deploy
 }

@@ -38,7 +38,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli"
-	"github.com/vmware-tanzu/velero/pkg/install"
+	"github.com/vmware-tanzu/velero/pkg/deploy"
 )
 
 // uninstallOptions collects all the options for uninstalling Velero from a Kubernetes cluster.
@@ -101,7 +101,7 @@ func Run(ctx context.Context, kbClient kbclient.Client, namespace string) error 
 	var errs []error
 
 	// ClusterRoleBinding
-	crb := install.ClusterRoleBinding(namespace)
+	crb := deploy.ClusterRoleBinding(namespace)
 	key := kbclient.ObjectKey{Name: crb.Name}
 	if err := kbClient.Get(ctx, key, crb); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -117,7 +117,7 @@ func Run(ctx context.Context, kbClient kbclient.Client, namespace string) error 
 
 	// CRDs
 
-	veleroLabelSelector := labels.SelectorFromSet(install.Labels())
+	veleroLabelSelector := labels.SelectorFromSet(deploy.Labels())
 	opts := []kbclient.DeleteAllOfOption{
 		kbclient.InNamespace(namespace),
 		kbclient.MatchingLabelsSelector{

@@ -37,7 +37,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/output"
-	"github.com/vmware-tanzu/velero/pkg/install"
+	"github.com/vmware-tanzu/velero/pkg/deploy"
 	kubeutil "github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
@@ -126,14 +126,14 @@ func NewInstallOptions() *InstallOptions {
 		PodAnnotations:            flag.NewMap(),
 		PodLabels:                 flag.NewMap(),
 		ServiceAccountAnnotations: flag.NewMap(),
-		VeleroPodCPURequest:       install.DefaultVeleroPodCPURequest,
-		VeleroPodMemRequest:       install.DefaultVeleroPodMemRequest,
-		VeleroPodCPULimit:         install.DefaultVeleroPodCPULimit,
-		VeleroPodMemLimit:         install.DefaultVeleroPodMemLimit,
-		NodeAgentPodCPURequest:    install.DefaultNodeAgentPodCPURequest,
-		NodeAgentPodMemRequest:    install.DefaultNodeAgentPodMemRequest,
-		NodeAgentPodCPULimit:      install.DefaultNodeAgentPodCPULimit,
-		NodeAgentPodMemLimit:      install.DefaultNodeAgentPodMemLimit,
+		VeleroPodCPURequest:       deploy.DefaultVeleroPodCPURequest,
+		VeleroPodMemRequest:       deploy.DefaultVeleroPodMemRequest,
+		VeleroPodCPULimit:         deploy.DefaultVeleroPodCPULimit,
+		VeleroPodMemLimit:         deploy.DefaultVeleroPodMemLimit,
+		NodeAgentPodCPURequest:    deploy.DefaultNodeAgentPodCPURequest,
+		NodeAgentPodMemRequest:    deploy.DefaultNodeAgentPodMemRequest,
+		NodeAgentPodCPULimit:      deploy.DefaultNodeAgentPodCPULimit,
+		NodeAgentPodMemLimit:      deploy.DefaultNodeAgentPodMemLimit,
 		// Default to creating a VSL unless we're told otherwise
 		UseVolumeSnapshots:       true,
 		NoDefaultBackupLocation:  false,
@@ -144,7 +144,7 @@ func NewInstallOptions() *InstallOptions {
 }
 
 // AsVeleroOptions translates the values provided at the command line into values used to instantiate Kubernetes resources
-func (o *InstallOptions) AsVeleroOptions() (*install.VeleroOptions, error) {
+func (o *InstallOptions) AsVeleroOptions() (*deploy.VeleroOptions, error) {
 	var secretData []byte
 	if o.SecretFile != "" && !o.NoSecret {
 		realPath, err := filepath.Abs(o.SecretFile)
@@ -176,7 +176,7 @@ func (o *InstallOptions) AsVeleroOptions() (*install.VeleroOptions, error) {
 		return nil, err
 	}
 
-	return &install.VeleroOptions{
+	return &deploy.VeleroOptions{
 		Namespace:                       o.Namespace,
 		Image:                           o.Image,
 		ProviderName:                    o.ProviderName,
@@ -262,14 +262,14 @@ This is useful as a starting point for more customized installations.
 func (o *InstallOptions) Run(c *cobra.Command, f client.Factory) error {
 	var resources *unstructured.UnstructuredList
 	if o.CRDsOnly {
-		resources = install.AllCRDs()
+		resources = deploy.AllCRDs()
 	} else {
 		vo, err := o.AsVeleroOptions()
 		if err != nil {
 			return err
 		}
 
-		resources = install.AllResources(vo)
+		resources = deploy.AllResources(vo)
 	}
 
 	if _, err := output.PrintWithFormat(c, resources); err != nil {
@@ -291,20 +291,20 @@ func (o *InstallOptions) Run(c *cobra.Command, f client.Factory) error {
 	}
 	errorMsg := fmt.Sprintf("\n\nError installing Velero. Use `kubectl logs deploy/velero -n %s` to check the deploy logs", o.Namespace)
 
-	err = install.Install(dynamicFactory, kbClient, resources, os.Stdout)
+	err = deploy.Install(dynamicFactory, kbClient, resources, os.Stdout)
 	if err != nil {
 		return errors.Wrap(err, errorMsg)
 	}
 
 	if o.Wait {
 		fmt.Println("Waiting for Velero deployment to be ready.")
-		if _, err = install.DeploymentIsReady(dynamicFactory, o.Namespace); err != nil {
+		if _, err = deploy.DeploymentIsReady(dynamicFactory, o.Namespace); err != nil {
 			return errors.Wrap(err, errorMsg)
 		}
 
 		if o.UseNodeAgent {
 			fmt.Println("Waiting for node-agent daemonset to be ready.")
-			if _, err = install.DaemonSetIsReady(dynamicFactory, o.Namespace); err != nil {
+			if _, err = deploy.DaemonSetIsReady(dynamicFactory, "node-agent", o.Namespace); err != nil {
 				return errors.Wrap(err, errorMsg)
 			}
 		}

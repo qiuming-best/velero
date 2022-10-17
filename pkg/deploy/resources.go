@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package install
+package deploy
 
 import (
 	"time"
@@ -195,7 +195,7 @@ func Secret(namespace string, data []byte) *corev1.Secret {
 	}
 }
 
-func appendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object) error {
+func AppendUnstructured(list *unstructured.UnstructuredList, obj runtime.Object) error {
 	u, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&obj)
 
 	// Remove the status field so we're not sending blank data to the server.
@@ -242,7 +242,7 @@ func AllCRDs() *unstructured.UnstructuredList {
 
 	for _, crd := range v1crds.CRDs {
 		crd.SetLabels(Labels())
-		appendUnstructured(resources, crd)
+		AppendUnstructured(resources, crd)
 	}
 
 	return resources
@@ -254,33 +254,33 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 	resources := AllCRDs()
 
 	ns := Namespace(o.Namespace)
-	appendUnstructured(resources, ns)
+	AppendUnstructured(resources, ns)
 
 	crb := ClusterRoleBinding(o.Namespace)
-	appendUnstructured(resources, crb)
+	AppendUnstructured(resources, crb)
 
 	sa := ServiceAccount(o.Namespace, o.ServiceAccountAnnotations)
-	appendUnstructured(resources, sa)
+	AppendUnstructured(resources, sa)
 
 	if o.SecretData != nil {
 		sec := Secret(o.Namespace, o.SecretData)
-		appendUnstructured(resources, sec)
+		AppendUnstructured(resources, sec)
 	}
 
 	if !o.NoDefaultBackupLocation {
 		bsl := BackupStorageLocation(o.Namespace, o.ProviderName, o.Bucket, o.Prefix, o.BSLConfig, o.CACertData)
-		appendUnstructured(resources, bsl)
+		AppendUnstructured(resources, bsl)
 	}
 
 	// A snapshot location may not be desirable for users relying on pod volume backup/restore
 	if o.UseVolumeSnapshots {
 		vsl := VolumeSnapshotLocation(o.Namespace, o.ProviderName, o.VSLConfig)
-		appendUnstructured(resources, vsl)
+		AppendUnstructured(resources, vsl)
 	}
 
 	secretPresent := o.SecretData != nil
 
-	deployOpts := []podTemplateOption{
+	deployOpts := []PodTemplateOption{
 		WithAnnotations(o.PodAnnotations),
 		WithLabels(o.PodLabels),
 		WithImage(o.Image),
@@ -309,10 +309,10 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 
 	deploy := Deployment(o.Namespace, deployOpts...)
 
-	appendUnstructured(resources, deploy)
+	AppendUnstructured(resources, deploy)
 
 	if o.UseNodeAgent {
-		dsOpts := []podTemplateOption{
+		dsOpts := []PodTemplateOption{
 			WithAnnotations(o.PodAnnotations),
 			WithLabels(o.PodLabels),
 			WithImage(o.Image),
@@ -323,7 +323,7 @@ func AllResources(o *VeleroOptions) *unstructured.UnstructuredList {
 			dsOpts = append(dsOpts, WithFeatures(o.Features))
 		}
 		ds := DaemonSet(o.Namespace, dsOpts...)
-		appendUnstructured(resources, ds)
+		AppendUnstructured(resources, ds)
 	}
 
 	return resources

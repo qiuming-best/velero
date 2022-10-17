@@ -48,14 +48,12 @@ func NewCommand(f client.Factory) *cobra.Command {
 				cmd.CheckError(err)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			defer cancel()
-
-			serverStatusGetter := &serverstatus.DefaultServerStatusGetter{
-				Namespace: f.Namespace(),
-				Context:   ctx,
+			serverVersion, clientVersion, err := GetVersion(f, kbClient)
+			if err != nil {
+				fmt.Fprintf(os.Stdout, "<error getting server version: %s>\n", err)
+				return
 			}
-			printVersion(os.Stdout, clientOnly, kbClient, serverStatusGetter)
+			printVersion(os.Stdout, clientOnly, kbClient, serverVersion, clientVersion)
 		},
 	}
 
@@ -65,7 +63,7 @@ func NewCommand(f client.Factory) *cobra.Command {
 	return c
 }
 
-func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, serverStatusGetter serverstatus.ServerStatusGetter) {
+func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, serverVersion, clientVersion string) {
 	fmt.Fprintln(w, "Client:")
 	fmt.Fprintf(w, "\tVersion: %s\n", buildinfo.Version)
 	fmt.Fprintf(w, "\tGit commit: %s\n", buildinfo.FormattedGitSHA())
@@ -74,16 +72,10 @@ func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, server
 		return
 	}
 
-	serverStatus, err := serverStatusGetter.GetServerStatus(kbClient)
-	if err != nil {
-		fmt.Fprintf(w, "<error getting server version: %s>\n", err)
-		return
-	}
-
 	fmt.Fprintln(w, "Server:")
-	fmt.Fprintf(w, "\tVersion: %s\n", serverStatus.Status.ServerVersion)
+	fmt.Fprintf(w, "\tVersion: %s\n", serverVersion)
 
-	serverSemVer := semver.MajorMinor(serverStatus.Status.ServerVersion)
+	serverSemVer := semver.MajorMinor(serverVersion)
 	cliSemVer := semver.MajorMinor(buildinfo.Version)
 	if serverSemVer != cliSemVer {
 		upgrade := "client"
@@ -93,4 +85,18 @@ func printVersion(w io.Writer, clientOnly bool, kbClient kbclient.Client, server
 		}
 		fmt.Fprintf(w, "# WARNING: the client version does not match the server version. Please update %s\n", upgrade)
 	}
+}
+
+func GetVersion(f client.Factory, kbClient kbclient.Client) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	serverStatusGetter := &serverstatus.DefaultServerStatusGetter{
+		Namespace: f.Namespace(),
+		Context:   ctx,
+	}
+	serverStatus, err := serverStatusGetter.GetServerStatus(kbClient)
+	if err != nil {
+		return "", "", err
+	}
+	return serverStatus.Status.ServerVersion, buildinfo.Version, nil
 }

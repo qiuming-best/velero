@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package install
+package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -209,7 +210,7 @@ func DeploymentIsReady(factory client.DynamicFactory, namespace string) (bool, e
 
 // DaemonSetIsReady will poll the kubernetes API server to ensure the node-agent daemonset is ready, i.e. that
 // pods are scheduled and available on all of the desired nodes.
-func DaemonSetIsReady(factory client.DynamicFactory, namespace string) (bool, error) {
+func DaemonSetIsReady(factory client.DynamicFactory, daemonsetName, namespace string) (bool, error) {
 	gvk := schema.FromAPIVersionAndKind(appsv1.SchemeGroupVersion.String(), "DaemonSet")
 	apiResource := metav1.APIResource{
 		Name:       "daemonsets",
@@ -226,7 +227,7 @@ func DaemonSetIsReady(factory client.DynamicFactory, namespace string) (bool, er
 	var readyObservations int32
 
 	err = wait.PollImmediate(time.Second, time.Minute, func() (bool, error) {
-		unstructuredDaemonSet, err := c.Get("node-agent", metav1.GetOptions{})
+		unstructuredDaemonSet, err := c.Get(daemonsetName, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		} else if err != nil {
@@ -286,14 +287,45 @@ func createResource(r *unstructured.Unstructured, factory client.DynamicFactory,
 	if err != nil {
 		return err
 	}
-
-	if _, err := c.Create(r); apierrors.IsAlreadyExists(err) {
-		log("already exists, proceeding")
-	} else if err != nil {
-		return errors.Wrapf(err, "Error creating resource %s", id)
+	desiredBytes, err := json.Marshal(r)
+	if err != nil {
+		return errors.Wrap(err, "unable to marshal desired object")
 	}
 
-	log("created")
+	if _, err := c.Patch(r.GetName(), desiredBytes); apierrors.IsNotFound(err) {
+		if _, err = c.Create(r); err != nil {
+			return errors.Wrapf(err, "Error creating resource %s", id)
+		}
+		log("not exists, created")
+	} else if err != nil {
+		return errors.Wrapf(err, "Error creating resource %s", id)
+	} else {
+		log("updated")
+	}
+
+	return nil
+}
+
+func deleteResource(r *unstructured.Unstructured, factory client.DynamicFactory, w io.Writer) error {
+	id := fmt.Sprintf("%s/%s", r.GetKind(), r.GetName())
+
+	// Helper to reduce boilerplate message about the same object
+	log := func(f string, a ...interface{}) {
+		format := strings.Join([]string{id, ": ", f, "\n"}, "")
+		fmt.Fprintf(w, format, a...)
+	}
+	log("attempting to delete resource")
+
+	c, err := CreateClient(r, factory, w)
+	if err != nil {
+		return err
+	}
+
+	if err := c.Delete(r.GetName(), metav1.DeleteOptions{}); err != nil {
+		return errors.Wrapf(err, "Error delete resource %s", id)
+	}
+
+	log("deleted")
 	return nil
 }
 
@@ -355,4 +387,67 @@ func Install(dynamicFactory client.DynamicFactory, kbClient kbclient.Client, res
 	}
 
 	return nil
+}
+
+//TODO
+func Delete(dynamicFactory client.DynamicFactory, kbClient kbclient.Client, resources *unstructured.UnstructuredList, w io.Writer) error {
+	rg := GroupResources(resources)
+
+	for _, r := range rg.CRDResources {
+		if err := deleteResource(r, dynamicFactory, w); err != nil {
+			return err
+		}
+	}
+	for _, r := range rg.OtherResources {
+		deleteResource(r, dynamicFactory, w)
+	}
+	return nil
+}
+
+func GetOriginalDeployment(factory client.DynamicFactory, namespace string) (*appsv1.Deployment, error) {
+	gvk := schema.FromAPIVersionAndKind(appsv1.SchemeGroupVersion.String(), "Deployment")
+	apiResource := metav1.APIResource{
+		Name:       "deployments",
+		Namespaced: true,
+	}
+	c, err := factory.ClientForGroupVersionResource(gvk.GroupVersion(), apiResource, namespace)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error creating client for deployment retrive")
+	}
+	unstructuredDeployment, err := c.Get("velero", metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, errors.Wrap(err, "error finding velero deployment")
+	} else if err != nil {
+		return nil, errors.Wrap(err, "error waiting for velero deployment to be ready")
+	}
+	deploy := new(appsv1.Deployment)
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredDeployment.Object, deploy); err != nil {
+		return nil, errors.Wrap(err, "error converting deployment from unstructured")
+	}
+	return deploy, nil
+}
+
+func GetOriginalDaemonSet(factory client.DynamicFactory, daemonsetName, namespace string) (*appsv1.DaemonSet, error) {
+	gvk := schema.FromAPIVersionAndKind(appsv1.SchemeGroupVersion.String(), "DaemonSet")
+	apiResource := metav1.APIResource{
+		Name:       "daemonsets",
+		Namespaced: true,
+	}
+
+	c, err := factory.ClientForGroupVersionResource(gvk.GroupVersion(), apiResource, namespace)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error creating client for daemonset polling")
+	}
+	unstructuredDaemonSet, err := c.Get(daemonsetName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil, errors.Wrap(err, "error finding velero daemonSet")
+	} else if err != nil {
+		return nil, errors.Wrap(err, "error waiting for velero daemonSet to be ready")
+	}
+
+	daemonSet := new(appsv1.DaemonSet)
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredDaemonSet.Object, daemonSet); err != nil {
+		return nil, errors.Wrap(err, "error converting daemonset from unstructured")
+	}
+	return daemonSet, nil
 }

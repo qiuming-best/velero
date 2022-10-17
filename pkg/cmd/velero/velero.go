@@ -44,6 +44,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/schedule"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/snapshotlocation"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/uninstall"
+	veleroupgrade "github.com/vmware-tanzu/velero/pkg/cmd/cli/upgrade"
 	"github.com/vmware-tanzu/velero/pkg/cmd/cli/version"
 	"github.com/vmware-tanzu/velero/pkg/cmd/server"
 	runplugin "github.com/vmware-tanzu/velero/pkg/cmd/server/plugin"
@@ -122,6 +123,7 @@ operations can also be performed as 'velero backup get' and 'velero schedule cre
 		backuplocation.NewCommand(f),
 		snapshotlocation.NewCommand(f),
 		debug.NewCommand(f),
+		veleroupgrade.NewCommand(f),
 	)
 
 	// init and add the klog flags

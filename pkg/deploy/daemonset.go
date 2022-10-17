@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package install
+package deploy
 
 import (
 	"fmt"
@@ -27,7 +27,7 @@ import (
 	"github.com/vmware-tanzu/velero/internal/velero"
 )
 
-func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
+func DaemonSet(namespace string, opts ...PodTemplateOption) *appsv1.DaemonSet {
 	c := &podTemplateConfig{
 		image: velero.DefaultVeleroImage(),
 	}
@@ -188,5 +188,37 @@ func DaemonSet(namespace string, opts ...podTemplateOption) *appsv1.DaemonSet {
 
 	daemonSet.Spec.Template.Spec.Containers[0].Env = append(daemonSet.Spec.Template.Spec.Containers[0].Env, c.envVars...)
 
+	return daemonSet
+}
+
+func PatchDaemonset(serverVersion string, daemonSet *appsv1.DaemonSet, opts ...PodTemplateOption) *appsv1.DaemonSet {
+	c := &podTemplateConfig{
+		image: velero.DefaultVeleroImage(),
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+	if serverVersion > "v1.9" {
+		daemonSetArgs := []string{
+			"node-agent",
+			"server",
+		}
+		if len(c.features) > 0 {
+			daemonSetArgs = append(daemonSetArgs, fmt.Sprintf("--features=%s", strings.Join(c.features, ",")))
+		}
+		daemonSet.Name = "node-agent"
+		daemonSet.ObjectMeta.Name = "node-agent"
+		daemonSet.Spec.Selector = &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"name": "node-agent",
+			},
+		}
+		daemonSet.Spec.Template.ObjectMeta.Labels["name"] = "node-agent"
+		daemonSet.Spec.Template.Spec.Containers[0].Name = "node-agent"
+		daemonSet.Spec.Template.Spec.Containers[0].Args = daemonSetArgs
+		daemonSet.ResourceVersion = ""
+	}
+	daemonSet.Spec.Template.Spec.Containers[0].Image = c.image
 	return daemonSet
 }
