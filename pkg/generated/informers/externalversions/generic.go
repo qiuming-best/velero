@@ -73,6 +73,10 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Velero().V1().Schedules().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("serverstatusrequests"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Velero().V1().ServerStatusRequests().Informer()}, nil
+	case v1.SchemeGroupVersion.WithResource("snapshotbackups"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Velero().V1().SnapshotBackups().Informer()}, nil
+	case v1.SchemeGroupVersion.WithResource("snapshotrestores"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Velero().V1().SnapshotRestores().Informer()}, nil
 	case v1.SchemeGroupVersion.WithResource("volumesnapshotlocations"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Velero().V1().VolumeSnapshotLocations().Informer()}, nil
 

@@ -16,9 +16,9 @@ limitations under the License.
 
 package v1
 
-// PodVolumeOperationProgress represents the progress of a
-// PodVolumeBackup/Restore operation
-type PodVolumeOperationProgress struct {
+// DataMoveOperationProgress represents the progress of a
+// data movement operation
+type DataMoveOperationProgress struct {
 	// +optional
 	TotalBytes int64 `json:"totalBytes,omitempty"`
 

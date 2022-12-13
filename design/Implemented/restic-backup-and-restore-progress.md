@@ -35,10 +35,10 @@ The PodVolumeRestore CR's status will be updated with this information.
 
 ## Changes to PodVolumeBackup and PodVolumeRestore Status type
 
-A new `Progress` field will be added to PodVolumeBackupStatus and PodVolumeRestoreStatus of type `PodVolumeOperationProgress`:
+A new `Progress` field will be added to PodVolumeBackupStatus and PodVolumeRestoreStatus of type `DataMoveOperationProgress`:
 
 ```
-type PodVolumeOperationProgress struct {
+type DataMoveOperationProgress struct {
   TotalBytes int64
   BytesDone int64
 }

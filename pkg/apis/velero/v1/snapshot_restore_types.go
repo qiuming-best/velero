@@ -1,5 +1,5 @@
 /*
-Copyright 2018 the Velero contributors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,17 +17,13 @@ limitations under the License.
 package v1
 
 import (
-	corev1api "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PodVolumeRestoreSpec is the specification for a PodVolumeRestore.
-type PodVolumeRestoreSpec struct {
-	// Pod is a reference to the pod containing the volume to be restored.
-	Pod corev1api.ObjectReference `json:"pod"`
-
-	// Volume is the name of the volume within the Pod to be restored.
-	Volume string `json:"volume"`
+// SnapshotRestoreSpec is the specification for a SnapshotRestore.
+type SnapshotRestoreSpec struct {
+	// Pvc is the name of the PVC for volume to be restored
+	Pvc string `json:"volume"`
 
 	// BackupStorageLocation is the name of the backup storage location
 	// where the backup repository is stored.
@@ -48,24 +44,24 @@ type PodVolumeRestoreSpec struct {
 	SourceNamespace string `json:"sourceNamespace"`
 }
 
-// PodVolumeRestorePhase represents the lifecycle phase of a PodVolumeRestore.
+// SnapshotRestorePhase represents the lifecycle phase of a SnapshotRestore.
 // +kubebuilder:validation:Enum=New;InProgress;Completed;Failed
-type PodVolumeRestorePhase string
+type SnapshotRestorePhase string
 
 const (
-	PodVolumeRestorePhaseNew        PodVolumeRestorePhase = "New"
-	PodVolumeRestorePhaseInProgress PodVolumeRestorePhase = "InProgress"
-	PodVolumeRestorePhaseCompleted  PodVolumeRestorePhase = "Completed"
-	PodVolumeRestorePhaseFailed     PodVolumeRestorePhase = "Failed"
+	SnapshotRestorePhaseNew        SnapshotRestorePhase = "New"
+	SnapshotRestorePhaseInProgress SnapshotRestorePhase = "InProgress"
+	SnapshotRestorePhaseCompleted  SnapshotRestorePhase = "Completed"
+	SnapshotRestorePhaseFailed     SnapshotRestorePhase = "Failed"
 )
 
-// PodVolumeRestoreStatus is the current status of a PodVolumeRestore.
-type PodVolumeRestoreStatus struct {
-	// Phase is the current state of the PodVolumeRestore.
+// SnapshotRestoreStatus is the current status of a SnapshotRestore.
+type SnapshotRestoreStatus struct {
+	// Phase is the current state of theSnapshotRestore.
 	// +optional
-	Phase PodVolumeRestorePhase `json:"phase,omitempty"`
+	Phase SnapshotRestorePhase `json:"phase,omitempty"`
 
-	// Message is a message about the pod volume restore's status.
+	// Message is a message about the snapshot restore's status.
 	// +optional
 	Message string `json:"message,omitempty"`
 
@@ -95,38 +91,36 @@ type PodVolumeRestoreStatus struct {
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
-// +kubebuilder:printcolumn:name="Namespace",type="string",JSONPath=".spec.pod.namespace",description="Namespace of the pod containing the volume to be restored"
-// +kubebuilder:printcolumn:name="Pod",type="string",JSONPath=".spec.pod.name",description="Name of the pod containing the volume to be restored"
 // +kubebuilder:printcolumn:name="Uploader Type",type="string",JSONPath=".spec.uploaderType",description="The type of the uploader to handle data transfer"
 // +kubebuilder:printcolumn:name="Volume",type="string",JSONPath=".spec.volume",description="Name of the volume to be restored"
-// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="Pod Volume Restore status such as New/InProgress"
-// +kubebuilder:printcolumn:name="TotalBytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Pod Volume Restore status such as New/InProgress"
-// +kubebuilder:printcolumn:name="BytesDone",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Pod Volume Restore status such as New/InProgress"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="Snapshot Restore status such as New/InProgress"
+// +kubebuilder:printcolumn:name="TotalBytes",type="integer",format="int64",JSONPath=".status.progress.totalBytes",description="Snapshot Restore status such as New/InProgress"
+// +kubebuilder:printcolumn:name="BytesDone",type="integer",format="int64",JSONPath=".status.progress.bytesDone",description="Snapshot Restore status such as New/InProgress"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
-type PodVolumeRestore struct {
+type SnapshotRestore struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// +optional
-	Spec PodVolumeRestoreSpec `json:"spec,omitempty"`
+	Spec SnapshotRestoreSpec `json:"spec,omitempty"`
 
 	// +optional
-	Status PodVolumeRestoreStatus `json:"status,omitempty"`
+	Status SnapshotRestoreStatus `json:"status,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 
-// PodVolumeRestoreList is a list of PodVolumeRestores.
-type PodVolumeRestoreList struct {
+// SnapshotRestoreList is a list of SnapshotRestores.
+type SnapshotRestoreList struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// +optional
 	metav1.ListMeta `json:"metadata,omitempty"`
 
-	Items []PodVolumeRestore `json:"items"`
+	Items []SnapshotRestore `json:"items"`
 }

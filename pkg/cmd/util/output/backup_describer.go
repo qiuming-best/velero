@@ -488,7 +488,7 @@ type volumesByPod struct {
 
 // Add adds a pod volume with the specified pod namespace, name
 // and volume to the appropriate group.
-func (v *volumesByPod) Add(namespace, name, volume, phase string, progress velerov1api.PodVolumeOperationProgress) {
+func (v *volumesByPod) Add(namespace, name, volume, phase string, progress velerov1api.DataMoveOperationProgress) {
 	if v.volumesByPodMap == nil {
 		v.volumesByPodMap = make(map[string]*podVolumeGroup)
 	}

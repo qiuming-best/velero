@@ -36,6 +36,8 @@ type VeleroV1Interface interface {
 	RestoresGetter
 	SchedulesGetter
 	ServerStatusRequestsGetter
+	SnapshotBackupsGetter
+	SnapshotRestoresGetter
 	VolumeSnapshotLocationsGetter
 }
 
@@ -82,6 +84,14 @@ func (c *VeleroV1Client) Schedules(namespace string) ScheduleInterface {
 
 func (c *VeleroV1Client) ServerStatusRequests(namespace string) ServerStatusRequestInterface {
 	return newServerStatusRequests(c, namespace)
+}
+
+func (c *VeleroV1Client) SnapshotBackups(namespace string) SnapshotBackupInterface {
+	return newSnapshotBackups(c, namespace)
+}
+
+func (c *VeleroV1Client) SnapshotRestores(namespace string) SnapshotRestoreInterface {
+	return newSnapshotRestores(c, namespace)
 }
 
 func (c *VeleroV1Client) VolumeSnapshotLocations(namespace string) VolumeSnapshotLocationInterface {
