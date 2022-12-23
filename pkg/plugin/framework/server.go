@@ -212,6 +212,9 @@ func (s *server) Serve() {
 	s.log.Level = s.logLevelFlag.Parse()
 	s.log.Debugf("Setting log level to %s", strings.ToUpper(s.log.Level.String()))
 
+	s.log.Info("Start Serve")
+	defer s.log.Info("Stop Serve")
+
 	command := os.Args[0]
 
 	var pluginIdentifiers []PluginIdentifier
