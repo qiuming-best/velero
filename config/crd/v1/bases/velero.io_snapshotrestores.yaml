@@ -65,6 +65,9 @@ spec:
                 description: BackupStorageLocation is the name of the backup storage
                   location where the backup repository is stored.
                 type: string
+              pvc:
+                description: Pvc is the name of the PVC for volume to be restored
+                type: string
               repoIdentifier:
                 description: RepoIdentifier is the backup repository identifier.
                 type: string
@@ -83,15 +86,12 @@ spec:
                 - restic
                 - ""
                 type: string
-              volume:
-                description: Pvc is the name of the PVC for volume to be restored
-                type: string
             required:
             - backupStorageLocation
+            - pvc
             - repoIdentifier
             - snapshotID
             - sourceNamespace
-            - volume
             type: object
           status:
             description: SnapshotRestoreStatus is the current status of a SnapshotRestore.

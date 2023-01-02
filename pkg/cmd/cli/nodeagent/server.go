@@ -214,9 +214,12 @@ func (s *nodeAgentServer) run() {
 	if err := pvbReconciler.SetupWithManager(s.mgr); err != nil {
 		s.logger.Fatal(err, "unable to create controller", "controller", controller.PodVolumeBackup)
 	}
-
-	if err = controller.NewPodVolumeRestoreReconciler(s.logger, s.mgr.GetClient(), credentialGetter).SetupWithManager(s.mgr); err != nil {
-		s.logger.WithError(err).Fatal("Unable to create the pod volume restore controller")
+	if err = controller.NewSnapshotBackupReconciler(s.mgr.GetScheme(), s.mgr.GetClient(), clock.RealClock{}, s.metrics, credentialGetter,
+		s.nodeName, filesystem.NewFileSystem(), s.logger).SetupWithManager(s.mgr); err != nil {
+		s.logger.WithError(err).Fatal("Unable to create the snapshot backup controller")
+	}
+	if err = controller.NewSnapshotRestoreReconciler(s.logger, s.mgr.GetClient(), credentialGetter, s.nodeName).SetupWithManager(s.mgr); err != nil {
+		s.logger.WithError(err).Fatal("Unable to create the snapshot restore controller")
 	}
 
 	s.logger.Info("Controllers starting...")

@@ -23,7 +23,7 @@ import (
 // SnapshotBackupSpec is the specification for a SnapshotBackup.
 type SnapshotBackupSpec struct {
 	// Pvc is the name of the PVC for the snapshot to be backed up
-	Pvc string `json:"volume"`
+	Pvc string `json:"pvc"`
 
 	// BackupStorageLocation is the name of the backup storage location
 	// where the backup repository is stored.
