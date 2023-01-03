@@ -61,3 +61,9 @@ func NewListOptionsForBackup(name string) metav1.ListOptions {
 		LabelSelector: fmt.Sprintf("%s=%s", velerov1api.BackupNameLabel, GetValidName(name)),
 	}
 }
+
+func NewListOptionsForRestore(name string) metav1.ListOptions {
+	return metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", velerov1api.RestoreNameLabel, GetValidName(name)),
+	}
+}

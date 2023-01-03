@@ -98,6 +98,7 @@ type backupController struct {
 	volumeSnapshotLister      snapshotv1listers.VolumeSnapshotLister
 	volumeSnapshotClient      snapshotterClientSet.Interface
 	credentialFileStore       credentials.FileStore
+	moveCSIData               bool
 }
 
 func NewBackupController(
@@ -123,6 +124,7 @@ func NewBackupController(
 	volumeSnapshotLister snapshotv1listers.VolumeSnapshotLister,
 	volumeSnapshotClient snapshotterClientSet.Interface,
 	credentialStore credentials.FileStore,
+	moveCSIData bool,
 ) Interface {
 	c := &backupController{
 		genericController:         newGenericController(Backup, logger),
@@ -148,6 +150,7 @@ func NewBackupController(
 		volumeSnapshotClient:      volumeSnapshotClient,
 		credentialFileStore:       credentialStore,
 		snapshotBackupClient:      snapshotBackupClient,
+		moveCSIData:               moveCSIData,
 	}
 
 	c.syncHandler = c.processBackup
@@ -350,6 +353,8 @@ func (c *backupController) prepareBackupRequest(backup *velerov1api.Backup, logg
 	request := &pkgbackup.Request{
 		Backup: backup.DeepCopy(), // don't modify items in the cache
 	}
+
+	request.CSIMoveData = c.moveCSIData
 
 	// set backup major version - deprecated, use Status.FormatVersion
 	request.Status.Version = pkgbackup.BackupVersion
@@ -735,7 +740,7 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 }
 
 func isMovingSnapshot(backup *pkgbackup.Request) bool {
-	return true
+	return backup.CSIMoveData
 }
 
 func (c *backupController) waitSnapshotBackup(backup *pkgbackup.Request, backupLog logrus.FieldLogger) []error {
@@ -790,8 +795,8 @@ func (c *backupController) waitSnapshotBackup(backup *pkgbackup.Request, backupL
 
 	eg.Wait()
 
-	///sleep 5s to make sure the plugin finishes its processing first whatever the processing is
-	time.Sleep(5 * time.Second)
+	///sleep 1 min to make sure the plugin finishes its processing first whatever the processing is
+	time.Sleep(time.Minute)
 
 	return errs
 }
