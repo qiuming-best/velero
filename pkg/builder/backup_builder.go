@@ -245,3 +245,9 @@ func (b *BackupBuilder) CSISnapshotTimeout(timeout time.Duration) *BackupBuilder
 	b.object.Spec.CSISnapshotTimeout.Duration = timeout
 	return b
 }
+
+// CSISnapshotMoveData sets the Backup's CSISnapshotMoveData
+func (b *BackupBuilder) CSISnapshotMoveData(val bool) *BackupBuilder {
+	b.object.Spec.CSISnapshotMoveData = &val
+	return b
+}

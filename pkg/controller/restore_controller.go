@@ -110,7 +110,6 @@ type restoreController struct {
 
 	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager
 	backupStoreGetter persistence.ObjectBackupStoreGetter
-	moveCSIData       bool
 }
 
 func NewRestoreController(
@@ -129,7 +128,6 @@ func NewRestoreController(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	logFormat logging.Format,
-	moveCSIData bool,
 ) Interface {
 	c := &restoreController{
 		genericController:      newGenericController(Restore, logger),
@@ -151,7 +149,6 @@ func NewRestoreController(
 		// replaced with fakes for testing.
 		newPluginManager:  newPluginManager,
 		backupStoreGetter: backupStoreGetter,
-		moveCSIData:       moveCSIData,
 	}
 
 	c.syncHandler = c.processQueueItem
@@ -524,7 +521,6 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 		PodVolumeBackups: podVolumeBackups,
 		VolumeSnapshots:  volumeSnapshots,
 		BackupReader:     backupFile,
-		CSIMoveData:      c.moveCSIData,
 	}
 	restoreWarnings, restoreErrors := c.restorer.RestoreWithResolvers(restoreReq, actionsResolver, snapshotItemResolver,
 		c.snapshotLocationLister, pluginManager)
@@ -608,7 +604,7 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 }
 
 func isMovingCSISnapshot(restore *pkgrestore.Request) bool {
-	return restore.CSIMoveData
+	return *restore.Restore.Spec.CSISnapshotMoveData
 }
 
 func (c *restoreController) waitSnapshotRestore(restore *pkgrestore.Request, restoreLog logrus.FieldLogger) pkgrestore.Result {

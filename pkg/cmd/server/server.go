@@ -134,7 +134,6 @@ type serverConfig struct {
 	garbageCollectionFrequency                                              time.Duration
 	defaultVolumesToFsBackup                                                bool
 	uploaderType                                                            string
-	moveCSIData                                                             bool
 }
 
 type controllerRunInfo struct {
@@ -231,7 +230,6 @@ func NewCommand(f client.Factory) *cobra.Command {
 	command.Flags().DurationVar(&config.garbageCollectionFrequency, "garbage-collection-frequency", config.garbageCollectionFrequency, "How often garbage collection is run for expired backups.")
 	command.Flags().BoolVar(&config.defaultVolumesToFsBackup, "default-volumes-to-fs-backup", config.defaultVolumesToFsBackup, "Backup all volumes with pod volume file system backup by default.")
 	command.Flags().StringVar(&config.uploaderType, "uploader-type", config.uploaderType, "Type of uploader to handle the transfer of data of pod volumes")
-	command.Flags().BoolVar(&config.moveCSIData, "move-data", config.moveCSIData, "Move CSI snapshot data")
 
 	return command
 }
@@ -261,7 +259,6 @@ type server struct {
 	mgr                                 manager.Manager
 	credentialFileStore                 credentials.FileStore
 	credentialSecretStore               credentials.SecretStore
-	moveCSIData                         bool
 }
 
 func newServer(f client.Factory, config serverConfig, logger *logrus.Logger) (*server, error) {
@@ -373,7 +370,6 @@ func newServer(f client.Factory, config serverConfig, logger *logrus.Logger) (*s
 		mgr:                                 mgr,
 		credentialFileStore:                 credentialFileStore,
 		credentialSecretStore:               credentialSecretStore,
-		moveCSIData:                         config.moveCSIData,
 	}
 
 	return s, nil
@@ -669,7 +665,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			s.getCSIVolumeSnapshotListers(),
 			s.csiSnapshotClient,
 			s.credentialFileStore,
-			s.moveCSIData,
 		)
 
 		return controllerRunInfo{
@@ -712,7 +707,6 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 			backupStoreGetter,
 			s.metrics,
 			s.config.formatFlag.Parse(),
-			s.moveCSIData,
 		)
 
 		return controllerRunInfo{

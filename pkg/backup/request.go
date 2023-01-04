@@ -51,7 +51,6 @@ type Request struct {
 	PodVolumeBackups          []*velerov1api.PodVolumeBackup
 	BackedUpItems             map[itemKey]struct{}
 	CSISnapshots              []snapshotv1api.VolumeSnapshot
-	CSIMoveData               bool
 }
 
 // BackupResourceList returns the list of backed up resources grouped by the API

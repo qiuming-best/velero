@@ -124,6 +124,11 @@ type BackupSpec struct {
 	// The default value is 10 minute.
 	// +optional
 	CSISnapshotTimeout metav1.Duration `json:"csiSnapshotTimeout,omitempty"`
+
+	// CSISnapshotMoveData specifies whether CSI snapshot data should be moved
+	// +optional
+	// +nullable
+	CSISnapshotMoveData *bool `json:"csiSnapshotMoveData,omitempty"`
 }
 
 // BackupHooks contains custom behaviors that should be executed at different phases of the backup.
