@@ -64,6 +64,10 @@ spec:
           spec:
             description: SnapshotBackupSpec is the specification for a SnapshotBackup.
             properties:
+              backupPvc:
+                description: BackupPvc is the name of the PVC for the snapshot to
+                  be backed up
+                type: string
               backupStorageLocation:
                 description: BackupStorageLocation is the name of the backup storage
                   location where the backup repository is stored.
@@ -85,14 +89,10 @@ spec:
                 - restic
                 - ""
                 type: string
-              volume:
-                description: Pvc is the name of the PVC for the snapshot to be backed
-                  up
-                type: string
             required:
+            - backupPvc
             - backupStorageLocation
             - repoIdentifier
-            - volume
             type: object
           status:
             description: SnapshotBackupStatus is the current status of a SnapshotBackup.
