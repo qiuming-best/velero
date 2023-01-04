@@ -99,6 +99,7 @@ type CreateOptions struct {
 	FromSchedule             string
 	OrderedResources         string
 	CSISnapshotTimeout       time.Duration
+	CSISnapshotMoveData      flag.OptionalBool
 
 	client veleroclient.Interface
 }
@@ -133,6 +134,9 @@ func (o *CreateOptions) BindFlags(flags *pflag.FlagSet) {
 	f.NoOptDefVal = "true"
 
 	f = flags.VarPF(&o.DefaultVolumesToFsBackup, "default-volumes-to-fs-backup", "", "Use pod volume file system backup by default for volumes")
+	f.NoOptDefVal = "true"
+
+	f = flags.VarPF(&o.CSISnapshotMoveData, "csi-move-data", "", "CSI snasphot data will be moved if set to true.")
 	f.NoOptDefVal = "true"
 }
 
@@ -352,6 +356,10 @@ func (o *CreateOptions) BuildBackup(namespace string) (*velerov1api.Backup, erro
 		}
 		if o.DefaultVolumesToFsBackup.Value != nil {
 			backupBuilder.DefaultVolumesToFsBackup(*o.DefaultVolumesToFsBackup.Value)
+		}
+
+		if o.CSISnapshotMoveData.Value != nil {
+			backupBuilder.CSISnapshotMoveData(*o.CSISnapshotMoveData.Value)
 		}
 	}
 

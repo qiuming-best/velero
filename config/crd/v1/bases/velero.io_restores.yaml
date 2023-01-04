@@ -41,6 +41,11 @@ spec:
                 description: BackupName is the unique name of the Velero backup to
                   restore from.
                 type: string
+              csiSnapshotMoveData:
+                description: CSISnapshotMoveData specifies whether CSI snapshot data
+                  should be moved
+                nullable: true
+                type: boolean
               excludedNamespaces:
                 description: ExcludedNamespaces contains a list of namespaces that
                   are not included in the restore.

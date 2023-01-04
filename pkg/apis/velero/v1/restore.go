@@ -112,6 +112,11 @@ type RestoreSpec struct {
 	// +optional
 	// +nullable
 	ExistingResourcePolicy PolicyType `json:"existingResourcePolicy,omitempty"`
+
+	// CSISnapshotMoveData specifies whether CSI snapshot data should be moved
+	// +optional
+	// +nullable
+	CSISnapshotMoveData *bool `json:"csiSnapshotMoveData,omitempty"`
 }
 
 // RestoreHooks contains custom behaviors that should be executed during or post restore.

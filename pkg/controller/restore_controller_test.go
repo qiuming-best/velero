@@ -111,6 +111,7 @@ func TestFetchBackupInfo(t *testing.T) {
 				sharedInformers.Velero().V1().Restores(),
 				client.VeleroV1(),
 				client.VeleroV1(),
+				client.VeleroV1(),
 				restorer,
 				sharedInformers.Velero().V1().Backups().Lister(),
 				fakeClient,
@@ -201,6 +202,7 @@ func TestProcessQueueItemSkips(t *testing.T) {
 			c := NewRestoreController(
 				velerov1api.DefaultNamespace,
 				sharedInformers.Velero().V1().Restores(),
+				client.VeleroV1(),
 				client.VeleroV1(),
 				client.VeleroV1(),
 				restorer,
@@ -439,6 +441,7 @@ func TestProcessQueueItem(t *testing.T) {
 				sharedInformers.Velero().V1().Restores(),
 				client.VeleroV1(),
 				client.VeleroV1(),
+				client.VeleroV1(),
 				restorer,
 				sharedInformers.Velero().V1().Backups().Lister(),
 				fakeClient,
@@ -669,6 +672,7 @@ func TestvalidateAndCompleteWhenScheduleNameSpecified(t *testing.T) {
 	c := NewRestoreController(
 		velerov1api.DefaultNamespace,
 		sharedInformers.Velero().V1().Restores(),
+		client.VeleroV1(),
 		client.VeleroV1(),
 		client.VeleroV1(),
 		nil,
