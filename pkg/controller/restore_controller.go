@@ -31,16 +31,19 @@ import (
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 
 	hook "github.com/vmware-tanzu/velero/internal/hook"
 	api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	"github.com/vmware-tanzu/velero/pkg/features"
 	velerov1client "github.com/vmware-tanzu/velero/pkg/generated/clientset/versioned/typed/velero/v1"
 	velerov1informers "github.com/vmware-tanzu/velero/pkg/generated/informers/externalversions/velero/v1"
 	velerov1listers "github.com/vmware-tanzu/velero/pkg/generated/listers/velero/v1"
@@ -94,6 +97,7 @@ type restoreController struct {
 	namespace              string
 	restoreClient          velerov1client.RestoresGetter
 	podVolumeBackupClient  velerov1client.PodVolumeBackupsGetter
+	snapshotRestoreClient  velerov1client.SnapshotRestoresGetter
 	restorer               pkgrestore.Restorer
 	backupLister           velerov1listers.BackupLister
 	restoreLister          velerov1listers.RestoreLister
@@ -106,6 +110,7 @@ type restoreController struct {
 
 	newPluginManager  func(logger logrus.FieldLogger) clientmgmt.Manager
 	backupStoreGetter persistence.ObjectBackupStoreGetter
+	moveCSIData       bool
 }
 
 func NewRestoreController(
@@ -113,6 +118,7 @@ func NewRestoreController(
 	restoreInformer velerov1informers.RestoreInformer,
 	restoreClient velerov1client.RestoresGetter,
 	podVolumeBackupClient velerov1client.PodVolumeBackupsGetter,
+	snapshotRestoreClient velerov1client.SnapshotRestoresGetter,
 	restorer pkgrestore.Restorer,
 	backupLister velerov1listers.BackupLister,
 	kbClient client.Client,
@@ -123,12 +129,14 @@ func NewRestoreController(
 	backupStoreGetter persistence.ObjectBackupStoreGetter,
 	metrics *metrics.ServerMetrics,
 	logFormat logging.Format,
+	moveCSIData bool,
 ) Interface {
 	c := &restoreController{
 		genericController:      newGenericController(Restore, logger),
 		namespace:              namespace,
 		restoreClient:          restoreClient,
 		podVolumeBackupClient:  podVolumeBackupClient,
+		snapshotRestoreClient:  snapshotRestoreClient,
 		restorer:               restorer,
 		backupLister:           backupLister,
 		restoreLister:          restoreInformer.Lister(),
@@ -143,6 +151,7 @@ func NewRestoreController(
 		// replaced with fakes for testing.
 		newPluginManager:  newPluginManager,
 		backupStoreGetter: backupStoreGetter,
+		moveCSIData:       moveCSIData,
 	}
 
 	c.syncHandler = c.processQueueItem
@@ -515,9 +524,22 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 		PodVolumeBackups: podVolumeBackups,
 		VolumeSnapshots:  volumeSnapshots,
 		BackupReader:     backupFile,
+		CSIMoveData:      c.moveCSIData,
 	}
 	restoreWarnings, restoreErrors := c.restorer.RestoreWithResolvers(restoreReq, actionsResolver, snapshotItemResolver,
 		c.snapshotLocationLister, pluginManager)
+
+	if features.IsEnabled(velerov1api.CSIFeatureFlag) {
+		if isMovingCSISnapshot(&restoreReq) {
+			///for now, wait the SnapshotRestore CR, in future, this is replaced by checking RIA V2's Progress interface
+			restoreLog.WithField("pid", os.Getpid()).Info("Start to wait snapshotrestore")
+			snapshotRestoreErrs := c.waitSnapshotRestore(&restoreReq, restoreLog)
+			restoreErrors.Merge(&snapshotRestoreErrs)
+			restoreLog.Info("Finish to wait snapshotrestore")
+		} else {
+			restoreLog.Info("Don't need to move CSI snapshot")
+		}
+	}
 
 	// log errors and warnings to the restore log
 	for _, msg := range restoreErrors.Velero {
@@ -542,6 +564,7 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 			restoreLog.Warnf("Namespace %v, resource restore warning: %v", ns, msg)
 		}
 	}
+
 	restoreLog.Info("restore completed")
 
 	// re-instantiate the backup store because credentials could have changed since the original
@@ -582,6 +605,68 @@ func (c *restoreController) runValidatedRestore(restore *api.Restore, info backu
 	}
 
 	return nil
+}
+
+func isMovingCSISnapshot(restore *pkgrestore.Request) bool {
+	return restore.CSIMoveData
+}
+
+func (c *restoreController) waitSnapshotRestore(restore *pkgrestore.Request, restoreLog logrus.FieldLogger) pkgrestore.Result {
+	ctx := context.Background()
+	errs := pkgrestore.Result{}
+
+	eg, _ := errgroup.WithContext(ctx)
+	timeout := restore.Backup.Spec.CSISnapshotTimeout.Duration
+	interval := 5 * time.Second
+
+	listOptions := label.NewListOptionsForRestore(label.GetValidName(restore.Name))
+	snapshotRestoreList, err := c.snapshotRestoreClient.SnapshotRestores(restore.Namespace).List(ctx, listOptions)
+	if err != nil {
+		restoreLog.WithError(err).Errorf("Failed to list snapshotrestores for restore: %s", restore.Name)
+		errs.AddVeleroError(errors.Wrap(err, "error to list snapshotrestores"))
+
+		return errs
+	}
+
+	for i := range snapshotRestoreList.Items {
+		snapshotRestore := snapshotRestoreList.Items[i]
+
+		eg.Go(func() error {
+			checkFunc := func() (bool, error) {
+				updated, err := c.snapshotRestoreClient.SnapshotRestores(snapshotRestore.Namespace).Get(ctx, snapshotRestore.Name, metav1.GetOptions{})
+				if err != nil {
+					return false, errors.Wrapf(err, fmt.Sprintf("failed to get snapshotRestore %s", snapshotRestore.Name))
+				}
+
+				if updated.Status.Phase == velerov1api.SnapshotRestorePhaseFailed {
+					return false, errors.Errorf("snapshot restore failed, %s", updated.Status.Message)
+				}
+
+				if updated.Status.Phase == velerov1api.SnapshotRestorePhaseCompleted {
+					return true, nil
+				}
+
+				return false, nil
+			}
+
+			err := wait.PollImmediate(interval, timeout, checkFunc)
+			if err != nil {
+				restoreLog.WithField("snapshotRestore", snapshotRestore.Name).WithError(err).Error("snapshotRestore failed")
+				errs.AddVeleroError(err)
+			} else {
+				restoreLog.WithField("snapshotRestore", snapshotRestore.Name).Info("snapshotRestore completes")
+			}
+
+			return err
+		})
+	}
+
+	eg.Wait()
+
+	///sleep 1 min to make sure the plugin finishes its processing first whatever the processing is
+	time.Sleep(time.Minute)
+
+	return errs
 }
 
 func putResults(restore *api.Restore, results map[string]pkgrestore.Result, backupStore persistence.BackupStore) error {

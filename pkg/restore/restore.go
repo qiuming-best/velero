@@ -82,6 +82,7 @@ type Request struct {
 	PodVolumeBackups []*velerov1api.PodVolumeBackup
 	VolumeSnapshots  []*volume.Snapshot
 	BackupReader     io.Reader
+	CSIMoveData      bool
 }
 
 // Restorer knows how to restore a backup.
