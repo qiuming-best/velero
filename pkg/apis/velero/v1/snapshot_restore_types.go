@@ -22,8 +22,8 @@ import (
 
 // SnapshotRestoreSpec is the specification for a SnapshotRestore.
 type SnapshotRestoreSpec struct {
-	// Pvc is the name of the PVC for volume to be restored
-	Pvc string `json:"pvc"`
+	// RestorePvc is the name of the PVC for volume to be restored
+	RestorePvc string `json:"restorePvc"`
 
 	// BackupStorageLocation is the name of the backup storage location
 	// where the backup repository is stored.

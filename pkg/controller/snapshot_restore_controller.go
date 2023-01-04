@@ -105,11 +105,11 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	pvc := &corev1.PersistentVolumeClaim{}
 	if err := s.Client.Get(ctx, types.NamespacedName{
 		Namespace: ssr.Namespace,
-		Name:      ssr.Spec.Pvc,
+		Name:      ssr.Spec.RestorePvc,
 	}, pvc); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "error getting pvc %s", ssr.Spec.Pvc)
+		return ctrl.Result{}, errors.Wrapf(err, "error getting pvc %s", ssr.Spec.RestorePvc)
 	} else if pvc.Status.Phase != v1.ClaimBound {
-		return s.updateStatusToFailed(ctx, ssr, errors.New("error waiting pvc status"), fmt.Sprintf("error restore snapshot for pvc %s for its status %s is not in Bound", ssr.Spec.Pvc, pvc.Status.Phase), log)
+		return s.updateStatusToFailed(ctx, ssr, errors.New("error waiting pvc status"), fmt.Sprintf("error restore snapshot for pvc %s for its status %s is not in Bound", ssr.Spec.RestorePvc, pvc.Status.Phase), log)
 	}
 
 	/*pv := &corev1.PersistentVolume{}
@@ -155,7 +155,7 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	podNamespacedName := client.ObjectKey{
 		Namespace: ssr.Namespace,
-		Name:      ssr.Spec.Pvc,
+		Name:      ssr.Spec.RestorePvc,
 	}
 
 	if err := wait.PollImmediate(PollInterval, PollTimeout, func() (done bool, err error) {
@@ -219,7 +219,7 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 func (s *SnapshotRestoreReconciler) processRestore(ctx context.Context, req *velerov1api.SnapshotRestore, pod *corev1api.Pod, log logrus.FieldLogger) error {
-	volumeDir, err := kube.GetVolumeDirectory(ctx, log, pod, req.Spec.Pvc, s.Client) //TODO
+	volumeDir, err := kube.GetVolumeDirectory(ctx, log, pod, req.Spec.RestorePvc, s.Client) //TODO
 	if err != nil {
 		return errors.Wrap(err, "error getting volume directory name")
 	}
@@ -293,10 +293,10 @@ func (s *SnapshotRestoreProgressUpdater) UpdateProgress(p *uploader.UploaderProg
 	original := s.SnapshotRestore.DeepCopy()
 	s.SnapshotRestore.Status.Progress = velerov1api.DataMoveOperationProgress{TotalBytes: p.TotalBytes, BytesDone: p.BytesDone}
 	if s.Cli == nil {
-		s.Log.Errorf("failed to update snapshot %s restore progress with uninitailize client", s.SnapshotRestore.Spec.Pvc)
+		s.Log.Errorf("failed to update snapshot %s restore progress with uninitailize client", s.SnapshotRestore.Spec.RestorePvc)
 		return
 	}
 	if err := s.Cli.Patch(s.Ctx, s.SnapshotRestore, client.MergeFrom(original)); err != nil {
-		s.Log.Errorf("update restore snapshot %s  progress with %v", s.SnapshotRestore.Spec.Pvc, err)
+		s.Log.Errorf("update restore snapshot %s  progress with %v", s.SnapshotRestore.Spec.RestorePvc, err)
 	}
 }

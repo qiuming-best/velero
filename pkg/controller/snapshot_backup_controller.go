@@ -107,13 +107,13 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	pvc := &corev1.PersistentVolumeClaim{}
 	if err := s.Client.Get(ctx, types.NamespacedName{
 		Namespace: ssb.Namespace,
-		Name:      ssb.Spec.Pvc,
+		Name:      ssb.Spec.BackupPvc,
 	}, pvc); err != nil {
-		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error getting pvc %s", ssb.Spec.Pvc), log)
+		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error getting pvc %s", ssb.Spec.BackupPvc), log)
 	} else if pvc.Status.Phase != v1.ClaimBound {
-		//log.Errorf("Skip backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.Pvc, pvc.Status.Phase)
-		//return ctrl.Result{}, errors.Errorf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.Pvc, pvc.Status.Phase)
-		return s.updateStatusToFailed(ctx, &ssb, errors.New("error waiting pvc status"), fmt.Sprintf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.Pvc, pvc.Status.Phase), log)
+		//log.Errorf("Skip backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase)
+		//return ctrl.Result{}, errors.Errorf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase)
+		return s.updateStatusToFailed(ctx, &ssb, errors.New("error waiting pvc status"), fmt.Sprintf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase), log)
 	}
 
 	/*pv := &corev1.PersistentVolume{}
@@ -153,7 +153,7 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	podNamespacedName := client.ObjectKey{
 		Namespace: ssb.Namespace,
-		Name:      ssb.Spec.Pvc,
+		Name:      ssb.Spec.BackupPvc,
 	}
 
 	if err := s.Client.Create(ctx, pod, &client.CreateOptions{}); err != nil {
@@ -198,7 +198,7 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	volDir, err := kube.GetVolumeDirectory(ctx, log, pod, ssb.Spec.Pvc, s.Client)
+	volDir, err := kube.GetVolumeDirectory(ctx, log, pod, ssb.Spec.BackupPvc, s.Client)
 	if err != nil {
 		return s.updateStatusToFailed(ctx, &ssb, err, "getting volume directory name", log)
 	}
@@ -366,10 +366,10 @@ func (s *SnapshotBackupProgressUpdater) UpdateProgress(p *uploader.UploaderProgr
 	original := s.SnapshotBackup.DeepCopy()
 	s.SnapshotBackup.Status.Progress = velerov1api.DataMoveOperationProgress{TotalBytes: p.TotalBytes, BytesDone: p.BytesDone}
 	if s.Cli == nil {
-		s.Log.Errorf("failed to update snapshot %s backup progress with uninitailize client", s.SnapshotBackup.Spec.Pvc)
+		s.Log.Errorf("failed to update snapshot %s backup progress with uninitailize client", s.SnapshotBackup.Spec.BackupPvc)
 		return
 	}
 	if err := s.Cli.Patch(s.Ctx, s.SnapshotBackup, client.MergeFrom(original)); err != nil {
-		s.Log.Errorf("update backup snapshot %s  progress with %v", s.SnapshotBackup.Spec.Pvc, err)
+		s.Log.Errorf("update backup snapshot %s  progress with %v", s.SnapshotBackup.Spec.BackupPvc, err)
 	}
 }

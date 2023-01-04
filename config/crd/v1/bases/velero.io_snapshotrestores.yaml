@@ -65,11 +65,11 @@ spec:
                 description: BackupStorageLocation is the name of the backup storage
                   location where the backup repository is stored.
                 type: string
-              pvc:
-                description: Pvc is the name of the PVC for volume to be restored
-                type: string
               repoIdentifier:
                 description: RepoIdentifier is the backup repository identifier.
+                type: string
+              restorePvc:
+                description: RestorePvc is the name of the PVC for volume to be restored
                 type: string
               snapshotID:
                 description: SnapshotID is the ID of the volume snapshot to be restored.
@@ -88,8 +88,8 @@ spec:
                 type: string
             required:
             - backupStorageLocation
-            - pvc
             - repoIdentifier
+            - restorePvc
             - snapshotID
             - sourceNamespace
             type: object
