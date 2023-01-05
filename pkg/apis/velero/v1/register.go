@@ -51,6 +51,7 @@ func CustomResources() map[string]typeInfo {
 		"DownloadRequest":        newTypeInfo("downloadrequests", &DownloadRequest{}, &DownloadRequestList{}),
 		"DeleteBackupRequest":    newTypeInfo("deletebackuprequests", &DeleteBackupRequest{}, &DeleteBackupRequestList{}),
 		"PodVolumeBackup":        newTypeInfo("podvolumebackups", &PodVolumeBackup{}, &PodVolumeBackupList{}),
+		"PodVolumeRestore":       newTypeInfo("podvolumerestores", &PodVolumeRestore{}, &PodVolumeRestoreList{}),
 		"SnapshotBackup":         newTypeInfo("snapshotbackups", &SnapshotBackup{}, &SnapshotBackupList{}),
 		"SnapshotRestore":        newTypeInfo("snapshotrestores", &SnapshotRestore{}, &SnapshotRestoreList{}),
 		"BackupRepository":       newTypeInfo("backuprepositories", &BackupRepository{}, &BackupRepositoryList{}),

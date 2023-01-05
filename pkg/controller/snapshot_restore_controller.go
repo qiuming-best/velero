@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,9 +44,10 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/util/kube"
 )
 
-func NewSnapshotRestoreReconciler(logger logrus.FieldLogger, client client.Client, credentialGetter *credentials.CredentialGetter, nodeName string) *SnapshotRestoreReconciler {
+func NewSnapshotRestoreReconciler(logger logrus.FieldLogger, client client.Client, kubeClient kubernetes.Interface, credentialGetter *credentials.CredentialGetter, nodeName string) *SnapshotRestoreReconciler {
 	return &SnapshotRestoreReconciler{
 		Client:            client,
+		kubeClient:        kubeClient,
 		logger:            logger.WithField("controller", "SnapshotRestore"),
 		credentialGetter:  credentialGetter,
 		fileSystem:        filesystem.NewFileSystem(),
@@ -57,6 +59,7 @@ func NewSnapshotRestoreReconciler(logger logrus.FieldLogger, client client.Clien
 
 type SnapshotRestoreReconciler struct {
 	client.Client
+	kubeClient        kubernetes.Interface
 	logger            logrus.FieldLogger
 	credentialGetter  *credentials.CredentialGetter
 	fileSystem        filesystem.Interface
@@ -102,46 +105,29 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	//Create pod and mount pvc
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := s.Client.Get(ctx, types.NamespacedName{
-		Namespace: ssr.Namespace,
-		Name:      ssr.Spec.RestorePvc,
-	}, pvc); err != nil {
-		return ctrl.Result{}, errors.Wrapf(err, "error getting pvc %s", ssr.Spec.RestorePvc)
-	} else if pvc.Status.Phase != v1.ClaimBound {
-		return s.updateStatusToFailed(ctx, ssr, errors.New("error waiting pvc status"), fmt.Sprintf("error restore snapshot for pvc %s for its status %s is not in Bound", ssr.Spec.RestorePvc, pvc.Status.Phase), log)
-	}
-
-	/*pv := &corev1.PersistentVolume{}
-	if err := s.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
-		return s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("error getting pv %s", pvc.Spec.VolumeName), log)
-		//return ctrl.Result{}, errors.Wrapf(err, "error getting pv %s", pvc.Spec.VolumeName)
-	} else if pv.Status.Phase != v1.VolumeBound {
-		return s.updateStatusToFailed(ctx, ssr, errors.New("error waiting pv status"), fmt.Sprintf("error restore snapshot for pv %s for its status %s is not in Bound", pvc.Spec.VolumeName, pv.Status.Phase), log)
-	}*/
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvc.Name,
+			Name:      ssr.Spec.RestorePvc,
 			Namespace: ssr.Namespace,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:    pvc.Name,
+					Name:    ssr.Spec.RestorePvc,
 					Image:   "gcr.io/velero-gcp/busybox",
 					Command: []string{"sleep", "infinity"},
 					VolumeMounts: []corev1.VolumeMount{{
-						Name:      pvc.Name,
-						MountPath: "/" + pvc.Name,
+						Name:      ssr.Spec.RestorePvc,
+						MountPath: "/" + ssr.Spec.RestorePvc,
 					}},
 				},
 			},
 			Volumes: []corev1.Volume{{
-				Name: pvc.Name,
+				Name: ssr.Spec.RestorePvc,
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: pvc.Name,
+						ClaimName: ssr.Spec.RestorePvc,
 					},
 				},
 			}},
@@ -152,6 +138,19 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("error creating pod %s in namespace %s", pod.Name, pod.Namespace), log)
 		}
 	}
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := wait.PollImmediate(PollInterval, PollTimeout, func() (done bool, err error) {
+		if err := s.Client.Get(ctx, types.NamespacedName{
+			Namespace: ssr.Namespace,
+			Name:      ssr.Spec.RestorePvc,
+		}, pvc); err != nil {
+			return false, err
+		} else {
+			return pvc.Status.Phase == v1.ClaimBound, nil
+		}
+	}); err != nil {
+		return s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("error with %v backup snapshot for pvc %s for its status %s is not in Bound", err, ssr.Spec.RestorePvc, pvc.Status.Phase), log)
+	}
 
 	podNamespacedName := client.ObjectKey{
 		Namespace: ssr.Namespace,
@@ -159,32 +158,29 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	if err := wait.PollImmediate(PollInterval, PollTimeout, func() (done bool, err error) {
-		if err := s.Client.Get(ctx, podNamespacedName, pod); err != nil {
+		var podErr error
+		if pod, podErr = s.kubeClient.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{}); podErr != nil {
 			return false, err
 		} else {
-			if pod.Spec.NodeName == s.nodeName {
-				return pod.Status.Phase == v1.PodRunning, nil
-			}
-			return true, nil
+			return pod.Status.Phase == v1.PodRunning, nil
+
 		}
 	}); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
 		return s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("failed to wait for pod %v running but %v with error %v", podNamespacedName, pod.Status.Phase, err), log)
 	}
+
 	if pod.Spec.NodeName != s.nodeName { // Only process items for this node.
 		return ctrl.Result{}, nil
 	}
-	/*
-		defer func() {
-			log.Debugf("deleting pod %s in namespace %s", pod.Name, pod.Namespace)
-			var gracePeriodSeconds int64 = 0
-			if err := s.Client.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: &gracePeriodSeconds}); err != nil {
-				s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("error delete pod %s in namespace %s", pod.Name, pod.Namespace), log)
-			}
-		}()
-	*/
+
+	defer func() {
+		log.Debugf("deleting pod %s in namespace %s", pod.Name, pod.Namespace)
+		var gracePeriodSeconds int64 = 0
+		if err := s.Client.Delete(ctx, pod, &client.DeleteOptions{GracePeriodSeconds: &gracePeriodSeconds}); err != nil {
+			s.updateStatusToFailed(ctx, ssr, err, fmt.Sprintf("error delete pod %s in namespace %s", pod.Name, pod.Namespace), log)
+		}
+	}()
+
 	original := ssr.DeepCopy()
 	ssr.Status.Phase = velerov1api.SnapshotRestorePhaseInProgress
 	ssr.Status.StartTimestamp = &metav1.Time{Time: s.clock.Now()}
@@ -219,7 +215,7 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 func (s *SnapshotRestoreReconciler) processRestore(ctx context.Context, req *velerov1api.SnapshotRestore, pod *corev1api.Pod, log logrus.FieldLogger) error {
-	volumeDir, err := kube.GetVolumeDirectory(ctx, log, pod, req.Spec.RestorePvc, s.Client) //TODO
+	volumeDir, err := kube.GetVolumeDirectory(ctx, log, pod, req.Spec.RestorePvc, s.Client)
 	if err != nil {
 		return errors.Wrap(err, "error getting volume directory name")
 	}

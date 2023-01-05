@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/clock"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,13 +48,14 @@ import (
 
 const (
 	PollInterval = 2 * time.Second
-	PollTimeout  = 1 * time.Minute
+	PollTimeout  = 5 * time.Minute
 )
 
 // SnapshotBackupReconciler reconciles a Snapshotbackup object
 type SnapshotBackupReconciler struct {
 	Scheme            *runtime.Scheme
 	Client            client.Client
+	kubeClient        kubernetes.Interface
 	Clock             clock.Clock
 	Metrics           *metrics.ServerMetrics
 	CredentialGetter  *credentials.CredentialGetter
@@ -70,8 +72,8 @@ type SnapshotBackupProgressUpdater struct {
 	Cli            client.Client
 }
 
-func NewSnapshotBackupReconciler(scheme *runtime.Scheme, client client.Client, clock clock.Clock, metrics *metrics.ServerMetrics, cred *credentials.CredentialGetter, nodeName string, fs filesystem.Interface, log logrus.FieldLogger) *SnapshotBackupReconciler {
-	return &SnapshotBackupReconciler{scheme, client, clock, metrics, cred, nodeName, fs, log, repository.NewRepositoryEnsurer(client, log)}
+func NewSnapshotBackupReconciler(scheme *runtime.Scheme, client client.Client, kubeClient kubernetes.Interface, clock clock.Clock, metrics *metrics.ServerMetrics, cred *credentials.CredentialGetter, nodeName string, fs filesystem.Interface, log logrus.FieldLogger) *SnapshotBackupReconciler {
+	return &SnapshotBackupReconciler{scheme, client, kubeClient, clock, metrics, cred, nodeName, fs, log, repository.NewRepositoryEnsurer(client, log)}
 }
 
 // +kubebuilder:rbac:groups=velero.io,resources=snapshotbackup,verbs=get;list;watch;create;update;patch;delete
@@ -104,56 +106,33 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	//Create pod and mount pvc
-	pvc := &corev1.PersistentVolumeClaim{}
-	if err := s.Client.Get(ctx, types.NamespacedName{
-		Namespace: ssb.Namespace,
-		Name:      ssb.Spec.BackupPvc,
-	}, pvc); err != nil {
-		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error getting pvc %s", ssb.Spec.BackupPvc), log)
-	} else if pvc.Status.Phase != v1.ClaimBound {
-		//log.Errorf("Skip backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase)
-		//return ctrl.Result{}, errors.Errorf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase)
-		return s.updateStatusToFailed(ctx, &ssb, errors.New("error waiting pvc status"), fmt.Sprintf("error backup snapshot for pvc %s for its status %s is not in Bound", ssb.Spec.BackupPvc, pvc.Status.Phase), log)
-	}
-
-	/*pv := &corev1.PersistentVolume{}
-	if err := s.Client.Get(ctx, types.NamespacedName{Name: pvc.Spec.VolumeName}, pv); err != nil {
-		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error getting pv %s", pvc.Spec.VolumeName), log)
-		//return ctrl.Result{}, errors.Wrapf(err, "error getting pv %s", pvc.Spec.VolumeName)
-	} else if pv.Status.Phase != v1.VolumeBound {
-		return s.updateStatusToFailed(ctx, &ssb, errors.New("error waiting pv status"), fmt.Sprintf("error backup snapshot for pv %s for its status %s is not in Bound", pvc.Spec.VolumeName, pv.Status.Phase), log)
-	}*/
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      pvc.Name,
+			Name:      ssb.Spec.BackupPvc,
 			Namespace: ssb.Namespace,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
-					Name:    pvc.Name,
+					Name:    ssb.Spec.BackupPvc,
 					Image:   "gcr.io/velero-gcp/busybox",
 					Command: []string{"sleep", "infinity"},
 					VolumeMounts: []corev1.VolumeMount{{
-						Name:      pvc.Name,
-						MountPath: "/" + pvc.Name,
+						Name:      ssb.Spec.BackupPvc,
+						MountPath: "/" + ssb.Spec.BackupPvc,
 					}},
 				},
 			},
 			Volumes: []corev1.Volume{{
-				Name: pvc.Name,
+				Name: ssb.Spec.BackupPvc,
 				VolumeSource: corev1.VolumeSource{
 					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: pvc.Name,
+						ClaimName: ssb.Spec.BackupPvc,
 					},
 				},
 			}},
 		},
-	}
-	podNamespacedName := client.ObjectKey{
-		Namespace: ssb.Namespace,
-		Name:      ssb.Spec.BackupPvc,
 	}
 
 	if err := s.Client.Create(ctx, pod, &client.CreateOptions{}); err != nil {
@@ -161,22 +140,36 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error creating pod %s in namespace %s", pod.Name, pod.Namespace), log)
 		}
 	}
-
+	pvc := &corev1.PersistentVolumeClaim{}
 	if err := wait.PollImmediate(PollInterval, PollTimeout, func() (done bool, err error) {
-		if err := s.Client.Get(ctx, podNamespacedName, pod); err != nil {
+		if err := s.Client.Get(ctx, types.NamespacedName{
+			Namespace: ssb.Namespace,
+			Name:      ssb.Spec.BackupPvc,
+		}, pvc); err != nil {
 			return false, err
 		} else {
-			if pod.Spec.NodeName == s.NodeName {
-				return pod.Status.Phase == v1.PodRunning, nil
-			}
-			return true, nil
+			return pvc.Status.Phase == v1.ClaimBound, nil
 		}
 	}); err != nil {
-		if apierrors.IsNotFound(err) { // skip pod not schedueled nodes
-			return ctrl.Result{}, nil
-		}
-		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("failed to wait for pod %v running %v", podNamespacedName, err), log)
+		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("error with %v backup snapshot for pvc %s for its status %s is not in Bound", err, ssb.Spec.BackupPvc, pvc.Status.Phase), log)
 	}
+
+	podNamespacedName := client.ObjectKey{
+		Namespace: pod.Namespace,
+		Name:      pod.Name,
+	}
+	if err := wait.PollImmediate(PollInterval, PollTimeout, func() (done bool, err error) {
+		var podErr error
+		if pod, podErr = s.kubeClient.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{}); podErr != nil {
+			return false, err
+		} else {
+			return pod.Status.Phase == v1.PodRunning, nil
+
+		}
+	}); err != nil {
+		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("failed to wait for pod %v running but %v with error %v", podNamespacedName, pod.Status.Phase, err), log)
+	}
+
 	if pod.Spec.NodeName != s.NodeName { // Only process items for this node.
 		return ctrl.Result{}, nil
 	}
