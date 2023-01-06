@@ -164,7 +164,6 @@ func (s *SnapshotBackupReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return false, err
 		} else {
 			return pod.Status.Phase == v1.PodRunning, nil
-
 		}
 	}); err != nil {
 		return s.updateStatusToFailed(ctx, &ssb, err, fmt.Sprintf("failed to wait for pod %v running but %v with error %v", podNamespacedName, pod.Status.Phase, err), log)

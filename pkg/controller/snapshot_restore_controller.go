@@ -198,7 +198,7 @@ func (s *SnapshotRestoreReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			log.WithError(err).Error("Unable to update status to failed")
 		}
 
-		log.WithError(err).Error("Unable to process the PodVolumeRestore")
+		log.WithError(err).Error("Unable to process the SnapshotRestore")
 		return ctrl.Result{}, err
 	}
 
@@ -237,7 +237,7 @@ func (s *SnapshotRestoreReconciler) processRestore(ctx context.Context, req *vel
 		return errors.Wrap(err, "error getting backup storage location")
 	}
 
-	backupRepo, err := s.repositoryEnsurer.EnsureRepo(ctx, req.Namespace, req.Spec.SourceNamespace, req.Spec.BackupStorageLocation, req.Spec.UploaderType)
+	backupRepo, err := s.repositoryEnsurer.EnsureRepo(ctx, req.Namespace, req.Namespace, req.Spec.BackupStorageLocation, req.Spec.UploaderType)
 	if err != nil {
 		return errors.Wrap(err, "error ensure backup repository")
 	}
