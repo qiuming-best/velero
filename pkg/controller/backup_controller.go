@@ -49,6 +49,7 @@ import (
 	kbclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/credentials"
+	"github.com/vmware-tanzu/velero/internal/resourcepolicies"
 	"github.com/vmware-tanzu/velero/internal/storage"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	pkgbackup "github.com/vmware-tanzu/velero/pkg/backup"
@@ -629,6 +630,8 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 	backupLog.Info("Setting up plugin manager")
 	pluginManager := c.newPluginManager(backupLog)
 	defer pluginManager.CleanupClients()
+
+	resourcepolicies.ResPoliciesMgr.InitResPoliciesMgr(backup.Namespace, c.kbClient)
 
 	backupLog.Info("Getting backup item actions")
 	actions, err := pluginManager.GetBackupItemActionsV2()
