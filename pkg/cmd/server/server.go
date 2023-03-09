@@ -628,6 +628,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	backupControllerRunInfo := func() controllerRunInfo {
 		backupper, err := backup.NewKubernetesBackupper(
 			s.veleroClient.VeleroV1(),
+			s.mgr.GetClient(),
 			s.discoveryHelper,
 			client.NewDynamicFactory(s.dynamicClient),
 			podexec.NewPodCommandExecutor(s.kubeClientConfig, s.kubeClient.CoreV1().RESTClient()),
@@ -815,6 +816,7 @@ func (s *server) runControllers(defaultVolumeSnapshotLocations map[string]string
 	if _, ok := enabledRuntimeControllers[controller.BackupFinalizer]; ok {
 		backupper, err := backup.NewKubernetesBackupper(
 			s.veleroClient.VeleroV1(),
+			s.mgr.GetClient(),
 			s.discoveryHelper,
 			client.NewDynamicFactory(s.dynamicClient),
 			podexec.NewPodCommandExecutor(s.kubeClientConfig, s.kubeClient.CoreV1().RESTClient()),

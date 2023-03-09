@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
+	kbClient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/vmware-tanzu/velero/internal/hook"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -77,6 +78,7 @@ type Backupper interface {
 // kubernetesBackupper implements Backupper.
 type kubernetesBackupper struct {
 	backupClient              velerov1client.BackupsGetter
+	kbClient                  kbClient.Client
 	dynamicFactory            client.DynamicFactory
 	discoveryHelper           discovery.Helper
 	podCommandExecutor        podexec.PodCommandExecutor
@@ -104,6 +106,7 @@ func cohabitatingResources() map[string]*cohabitatingResource {
 // NewKubernetesBackupper creates a new kubernetesBackupper.
 func NewKubernetesBackupper(
 	backupClient velerov1client.BackupsGetter,
+	kbClient kbClient.Client,
 	discoveryHelper discovery.Helper,
 	dynamicFactory client.DynamicFactory,
 	podCommandExecutor podexec.PodCommandExecutor,
@@ -115,6 +118,7 @@ func NewKubernetesBackupper(
 ) (Backupper, error) {
 	return &kubernetesBackupper{
 		backupClient:              backupClient,
+		kbClient:                  kbClient,
 		discoveryHelper:           discoveryHelper,
 		dynamicFactory:            dynamicFactory,
 		podCommandExecutor:        podCommandExecutor,
@@ -286,6 +290,7 @@ func (kb *kubernetesBackupper) BackupWithResolvers(log logrus.FieldLogger,
 		backupRequest:            backupRequest,
 		tarWriter:                tw,
 		dynamicFactory:           kb.dynamicFactory,
+		kbClient:                 kb.kbClient,
 		discoveryHelper:          kb.discoveryHelper,
 		podVolumeBackupper:       podVolumeBackupper,
 		podVolumeSnapshotTracker: newPVCSnapshotTracker(),
@@ -576,6 +581,7 @@ func (kb *kubernetesBackupper) FinalizeBackup(log logrus.FieldLogger,
 		backupRequest:   backupRequest,
 		tarWriter:       tw,
 		dynamicFactory:  kb.dynamicFactory,
+		kbClient:        kb.kbClient,
 		discoveryHelper: kb.discoveryHelper,
 		itemHookHandler: &hook.NoOpItemHookHandler{},
 	}

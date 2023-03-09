@@ -485,6 +485,19 @@ func (c *backupController) prepareBackupRequest(backup *velerov1api.Backup, logg
 		request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("encountered labelSelector as well as orLabelSelectors in backup spec, only one can be specified"))
 	}
 
+	if request.Spec.ResourcePolices != nil && request.Spec.ResourcePolices.RefType == resourcepolicies.ConfigmapRefType {
+		policiesConfigmap := &v1.ConfigMap{}
+		err := c.kbClient.Get(context.Background(), kbclient.ObjectKey{Namespace: request.Namespace, Name: request.Spec.ResourcePolices.RefName}, policiesConfigmap)
+		if err != nil {
+			request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("failed to get resource policies %s/%s configmap with err %v", request.Namespace, request.Spec.ResourcePolices.RefName, err))
+		}
+		res, err := resourcepolicies.GetResourcePoliciesFromConfig(policiesConfigmap)
+		if err != nil {
+			request.Status.ValidationErrors = append(request.Status.ValidationErrors, fmt.Sprintf("failed to get the user resource policies %s/%s config with err %v", request.Namespace, request.Spec.ResourcePolices.RefName, err))
+		}
+		request.ResPolicies = res
+	}
+
 	return request
 }
 
@@ -630,8 +643,6 @@ func (c *backupController) runBackup(backup *pkgbackup.Request) error {
 	backupLog.Info("Setting up plugin manager")
 	pluginManager := c.newPluginManager(backupLog)
 	defer pluginManager.CleanupClients()
-
-	resourcepolicies.ResPoliciesMgr.InitResPoliciesMgr(backup.Namespace, c.kbClient)
 
 	backupLog.Info("Getting backup item actions")
 	actions, err := pluginManager.GetBackupItemActionsV2()

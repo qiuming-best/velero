@@ -251,3 +251,9 @@ func (b *BackupBuilder) ItemOperationTimeout(timeout time.Duration) *BackupBuild
 	b.object.Spec.ItemOperationTimeout.Duration = timeout
 	return b
 }
+
+// ResourcePolices sets the Backup's resource polices.
+func (b *BackupBuilder) ResourcePolices(name string) *BackupBuilder {
+	b.object.Spec.ResourcePolices = &velerov1api.ResourcePolices{RefType: "configmap", RefName: name}
+	return b
+}
