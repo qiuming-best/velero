@@ -41,7 +41,7 @@ var ReportData *Report
 
 type VeleroConfig struct {
 	VeleroCfgInPerf
-	*install.Options
+	install.Options
 	VeleroCLI                         string
 	VeleroImage                       string
 	VeleroVersion                     string
