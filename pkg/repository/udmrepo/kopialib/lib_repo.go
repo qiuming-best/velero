@@ -210,7 +210,6 @@ func (km *kopiaMaintenance) runMaintenance(ctx context.Context, rep repo.DirectR
 	if err != nil {
 		return errors.Wrapf(err, "error to run maintenance under mode %s", km.mode)
 	}
-
 	return nil
 }
 

@@ -42,8 +42,9 @@ import (
 )
 
 const (
-	repoSyncPeriod           = 5 * time.Minute
-	defaultMaintainFrequency = 7 * 24 * time.Hour
+	repoSyncPeriod                = 5 * time.Minute
+	defaultMaintainFrequency      = 7 * 24 * time.Hour
+	defaultMaintainRetryFrequency = 1 * time.Hour
 )
 
 type BackupRepoReconciler struct {
@@ -272,13 +273,39 @@ func ensureRepo(repo *velerov1api.BackupRepository, repoManager repository.Manag
 	return repoManager.PrepareRepo(repo)
 }
 
-func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) error {
-	log.Debug("backupRepositoryController.runMaintenanceIfDue")
+func (r *BackupRepoReconciler) shouldRetryMaintenance(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) bool {
+	log.Debug("Checking if maintenance should be retried")
 
+	if req.Status.Message == "" {
+		return true
+	}
+
+	job, err := repository.GetLatestMaintenanceJob(r.Client, req.Name)
+	if err != nil {
+		log.WithError(err).Error("error getting latest maintenance job")
+		return false
+	}
+
+	if job != nil && job.Status.Failed > 0 && job.CreationTimestamp.Add(defaultMaintainRetryFrequency).Before(r.clock.Now()) {
+		log.Debug("Latest maintenance job failed and is older than retry frequency, retrying maintenance")
+		return true
+	} else {
+		log.Debugf("Latest maintenance job %s is not older than retry frequency, not retrying maintenance", job.Name)
+	}
+
+	return false
+}
+
+func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *velerov1api.BackupRepository, log logrus.FieldLogger) error {
 	now := r.clock.Now()
 
 	if !dueForMaintenance(req, now) {
 		log.Debug("not due for maintenance")
+		return nil
+	}
+
+	if !r.shouldRetryMaintenance(ctx, req, log) {
+		log.Debug("not retrying maintenance")
 		return nil
 	}
 
@@ -295,6 +322,7 @@ func (r *BackupRepoReconciler) runMaintenanceIfDue(ctx context.Context, req *vel
 	}
 
 	return r.patchBackupRepository(ctx, req, func(rr *velerov1api.BackupRepository) {
+		rr.Status.Message = ""
 		rr.Status.LastMaintenanceTime = &metav1.Time{Time: now}
 	})
 }

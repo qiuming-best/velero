@@ -32,23 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	corev1api "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/utils/clock"
-	ctrl "sigs.k8s.io/controller-runtime"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	"github.com/vmware-tanzu/velero/internal/credentials"
 	"github.com/vmware-tanzu/velero/internal/storage"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -57,6 +40,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/buildinfo"
 	"github.com/vmware-tanzu/velero/pkg/client"
 	"github.com/vmware-tanzu/velero/pkg/cmd"
+	"github.com/vmware-tanzu/velero/pkg/cmd/server/repomaintenance"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/flag"
 	"github.com/vmware-tanzu/velero/pkg/cmd/util/signals"
 	"github.com/vmware-tanzu/velero/pkg/controller"
@@ -76,6 +60,24 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/uploader"
 	"github.com/vmware-tanzu/velero/pkg/util/filesystem"
 	"github.com/vmware-tanzu/velero/pkg/util/logging"
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1api "k8s.io/api/batch/v1"
+	corev1api "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	kubeerrs "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/clock"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 const (
@@ -134,6 +136,7 @@ type serverConfig struct {
 	defaultSnapshotMoveData                                                 bool
 	disableInformerCache                                                    bool
 	scheduleSkipImmediately                                                 bool
+	maintenanceCfg                                                          repository.MaintenanceConfig
 }
 
 func NewCommand(f client.Factory) *cobra.Command {
@@ -165,6 +168,9 @@ func NewCommand(f client.Factory) *cobra.Command {
 			defaultSnapshotMoveData:        false,
 			disableInformerCache:           defaultDisableInformerCache,
 			scheduleSkipImmediately:        false,
+			maintenanceCfg: repository.MaintenanceConfig{
+				KeepLatestMaitenanceJobs: 3,
+			},
 		}
 	)
 
@@ -238,7 +244,17 @@ func NewCommand(f client.Factory) *cobra.Command {
 	command.Flags().BoolVar(&config.defaultSnapshotMoveData, "default-snapshot-move-data", config.defaultSnapshotMoveData, "Move data by default for all snapshots supporting data movement.")
 	command.Flags().BoolVar(&config.disableInformerCache, "disable-informer-cache", config.disableInformerCache, "Disable informer cache for Get calls on restore. With this enabled, it will speed up restore in cases where there are backup resources which already exist in the cluster, but for very large clusters this will increase velero memory usage. Default is false (don't disable).")
 	command.Flags().BoolVar(&config.scheduleSkipImmediately, "schedule-skip-immediately", config.scheduleSkipImmediately, "Skip the first scheduled backup immediately after creating a schedule. Default is false (don't skip).")
+	command.Flags().IntVar(&config.maintenanceCfg.KeepLatestMaitenanceJobs, "keep-latest-maintenance-jobs", config.maintenanceCfg.KeepLatestMaitenanceJobs, "Number of latest maintenance jobs to keep each repository. Default is 3.")
+	command.Flags().StringVar(&config.maintenanceCfg.CPURequest, "maintenance-job-cpu-request", config.maintenanceCfg.CPURequest, "CPU request for maintenance job. Default is empty.")
+	command.Flags().StringVar(&config.maintenanceCfg.MemoryRequest, "maintenance-job-memory-request", config.maintenanceCfg.MemoryRequest, "Memory request for maintenance job. Default is empty.")
+	command.Flags().StringVar(&config.maintenanceCfg.CPULimit, "maintenance-job-cpu-limit", config.maintenanceCfg.CPULimit, "CPU limit for maintenance job. Default is empty.")
+	command.Flags().StringVar(&config.maintenanceCfg.MemoryLimit, "maintenance-job-memory-limit", config.maintenanceCfg.MemoryLimit, "Memory limit for maintenance job. Default is empty.")
 
+	// inherited from server command
+	config.maintenanceCfg.FormatFlag = config.formatFlag
+	config.maintenanceCfg.LogLevelFlag = logLevelFlag
+
+	command.AddCommand(repomaintenance.NewCommand(f))
 	return command
 }
 
@@ -342,6 +358,14 @@ func newServer(f client.Factory, config serverConfig, logger *logrus.Logger) (*s
 		return nil, err
 	}
 	if err := snapshotv1api.AddToScheme(scheme); err != nil {
+		cancelFunc()
+		return nil, err
+	}
+	if err := batchv1api.AddToScheme(scheme); err != nil {
+		cancelFunc()
+		return nil, err
+	}
+	if err := appsv1.AddToScheme(scheme); err != nil {
 		cancelFunc()
 		return nil, err
 	}
@@ -636,7 +660,7 @@ func (s *server) initRepoManager() error {
 	s.repoLocker = repository.NewRepoLocker()
 	s.repoEnsurer = repository.NewEnsurer(s.mgr.GetClient(), s.logger, s.config.resourceTimeout)
 
-	s.repoManager = repository.NewManager(s.namespace, s.mgr.GetClient(), s.repoLocker, s.repoEnsurer, s.credentialFileStore, s.credentialSecretStore, s.logger)
+	s.repoManager = repository.NewManager(s.namespace, s.mgr.GetClient(), s.repoLocker, s.repoEnsurer, s.credentialFileStore, s.credentialSecretStore, s.config.maintenanceCfg, s.logger)
 
 	return nil
 }
