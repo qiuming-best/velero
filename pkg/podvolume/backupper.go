@@ -97,6 +97,11 @@ func (pbs *PVCBackupSummary) addSkipped(volumeName string, reason string) {
 	}
 }
 
+func (pbs *PVCBackupSummary) isSkipped(volumeName string) bool {
+	_, ok := pbs.Skipped[volumeName]
+	return ok
+}
+
 func newBackupper(
 	ctx context.Context,
 	repoLocker *repository.RepoLocker,
@@ -191,6 +196,48 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 		}
 	}
 
+	hasVolumeNeedBackup := false
+	if resPolicies != nil {
+		for _, volumeName := range volumesToBackup {
+			pvc, ok := pvcSummary.pvcMap[volumeName]
+			if !ok {
+				// there should have been error happened retrieving the PVC and it's recorded already
+				continue
+			}
+			if action, err := b.getMatchAction(resPolicies, pvc, nil); err != nil {
+				errs = append(errs, errors.Wrapf(err, "error getting policy action for pvc %s", pvc.Spec.VolumeName))
+				continue
+			} else if action != nil {
+				if action.Type != resourcepolicies.Skip {
+					hasVolumeNeedBackup = true
+				} else {
+					pvcSummary.addSkipped(volumeName, "matched action is 'skip' in chosen resource policies")
+				}
+			}
+
+			podVolume, ok := podVolumes[volumeName]
+			if !ok {
+				log.Warnf("No volume named %s found in pod %s/%s, skipping", volumeName, pod.Namespace, pod.Name)
+				continue
+			}
+			if action, err := b.getMatchAction(resPolicies, nil, &podVolume); err != nil {
+				errs = append(errs, errors.Wrapf(err, "error getting policy action for volume %s", volumeName))
+				continue
+			} else if action != nil {
+				if action.Type != resourcepolicies.Skip {
+					hasVolumeNeedBackup = true
+				} else {
+					pvcSummary.addSkipped(volumeName, "matched action is 'skip' in chosen resource policies")
+				}
+			}
+		}
+	}
+
+	if !hasVolumeNeedBackup {
+		log.Infof("skip backup of pod %s/%s because no volume need backup", pod.Namespace, pod.Name)
+		return nil, pvcSummary, nil
+	}
+
 	if err := kube.IsPodRunning(pod); err != nil {
 		skipAllPodVolumes(pod, volumesToBackup, err, pvcSummary, log)
 		return nil, pvcSummary, nil
@@ -245,9 +292,13 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 
 	var numVolumeSnapshots int
 	for _, volumeName := range volumesToBackup {
+		if pvcSummary.isSkipped(volumeName) {
+			continue
+		}
+
 		volume, ok := podVolumes[volumeName]
 		if !ok {
-			log.Warnf("No volume named %s found in pod %s/%s, skipping", volumeName, pod.Namespace, pod.Name)
+			// already logged in the previous loop
 			continue
 		}
 		var pvc *corev1api.PersistentVolumeClaim
@@ -287,17 +338,6 @@ func (b *backupper) BackupPodVolumes(backup *velerov1api.Backup, pod *corev1api.
 			log.Warn(msg)
 			pvcSummary.addSkipped(volumeName, msg)
 			continue
-		}
-
-		if resPolicies != nil {
-			if action, err := b.getMatchAction(resPolicies, pvc, &volume); err != nil {
-				errs = append(errs, errors.Wrapf(err, "error getting pv for pvc %s", pvc.Spec.VolumeName))
-				continue
-			} else if action != nil && action.Type == resourcepolicies.Skip {
-				log.Infof("skip backup of volume %s for the matched resource policies", volumeName)
-				pvcSummary.addSkipped(volumeName, "matched action is 'skip' in chosen resource policies")
-				continue
-			}
 		}
 
 		volumeBackup := newPodVolumeBackup(backup, pod, volume, repoIdentifier, b.uploaderType, pvc)
