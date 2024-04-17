@@ -53,29 +53,68 @@ SKIP_STR := $(foreach var, $(subst ., ,$(GINKGO_SKIP)),-skip "$(var)")
 FOCUS_STR := $(foreach var, $(subst ., ,$(GINKGO_FOCUS)),-focus "$(var)")
 VELERO_CLI ?=$$(pwd)/../../_output/bin/$(GOOS)/$(GOARCH)/velero
 VELERO_IMAGE ?= velero/velero:main
-VELERO_VERSION ?= $(VERSION)
 PLUGINS ?=
 RESTORE_HELPER_IMAGE ?=
+#Released version only
+UPGRADE_FROM_VELERO_VERSION ?= v1.12.3,v1.13.0
+# UPGRADE_FROM_VELERO_CLI can has the same format(a list divided by comma) with UPGRADE_FROM_VELERO_VERSION
+# Upgrade tests will be executed sequently according to the list by UPGRADE_FROM_VELERO_VERSION
+# So although length of UPGRADE_FROM_VELERO_CLI list is not equal with UPGRADE_FROM_VELERO_VERSION
+# Script will still read UPGRADE_FROM_VELERO_CLI list to match UPGRADE_FROM_VELERO_VERSION list from beginning
+# to the end, nil string will be set if UPGRADE_FROM_VELERO_CLI is shorter than UPGRADE_FROM_VELERO_VERSION
+UPGRADE_FROM_VELERO_CLI ?=
+
+MIGRATE_FROM_VELERO_VERSION ?= v1.13.0,self
+MIGRATE_FROM_VELERO_CLI ?=
 
 VELERO_NAMESPACE ?= velero
 CREDS_FILE ?=
+DEFAULT_CLS_SERVICE_ACCOUNT_NAME ?=
+STANDBY_CLS_SERVICE_ACCOUNT_NAME ?=
 BSL_BUCKET ?=
 BSL_PREFIX ?=
 BSL_CONFIG ?=
 VSL_CONFIG ?=
 CLOUD_PROVIDER ?=
+STANDBY_CLUSTER_CLOUD_PROVIDER ?=
+STANDBY_CLUSTER_PLUGINS ?=
+STANDBY_CLUSTER_OBJECT_STORE_PROVIDER ?=
 OBJECT_STORE_PROVIDER ?=
 INSTALL_VELERO ?= true
 REGISTRY_CREDENTIAL_FILE ?=
+KIBISHII_DIRECTORY ?= github.com/vmware-tanzu-experiments/distributed-data-generator/kubernetes/yaml/
+
+
+# Flags to create an additional BSL for multiple credentials tests
+ADDITIONAL_BSL_PLUGINS ?=
+ADDITIONAL_OBJECT_STORE_PROVIDER ?=
+ADDITIONAL_CREDS_FILE ?=
+ADDITIONAL_BSL_BUCKET ?=
+ADDITIONAL_BSL_PREFIX ?=
+ADDITIONAL_BSL_CONFIG ?=
 
 FEATURES ?=
 DEBUG_E2E_TEST ?= false
+DEBUG_VELERO_POD_RESTART ?= false
 VELERO_SERVER_DEBUG_MODE ?= false
-NFS_SERVER_PATH ?=
+
 # Parameters to run migration tests along with all other E2E tests, and both of them should
 #   be provided or left them all empty to skip migration tests with no influence to other
 #   E2E tests.
+DEFAULT_CLUSTER ?=
+STANDBY_CLUSTER ?=
+
 UPLOADER_TYPE ?=
+
+SNAPSHOT_MOVE_DATA ?= false
+DATA_MOVER_PLUGIN ?=
+DISABLE_INFORMER_CACHE ?= false
+
+DEFAULT_CLUSTER_NAME ?=
+STANDBY_CLUSTER_NAME ?=
+EKS_POLICY_ARN ?=
+
+# perf test related parameters
 TEST_CASE_DESCRIBE ?= 'velero performance test'
 BACKUP_FOR_RESTORE ?=
 Delete_Cluster_Resource ?= false
@@ -90,6 +129,7 @@ VELERO_POD_CPU_REQUEST ?= 2
 VELERO_POD_MEM_REQUEST ?= 2Gi
 POD_VOLUME_OPERATION_TIMEOUT ?= 6h
 
+
 # Make sure ginkgo is in $GOBIN
 .PHONY:ginkgo
 ginkgo: ${GOBIN}/ginkgo
@@ -98,15 +138,68 @@ ginkgo: ${GOBIN}/ginkgo
 ${GOBIN}/ginkgo:
 	GOBIN=${GOBIN} go install github.com/onsi/ginkgo/ginkgo@v1.16.5
 
-.PHONY: run
-run: ginkgo
+.PHONY: run-e2e
+run-e2e: ginkgo
 		@[ "${CREDS_FILE}" ] && echo "Using credentials from ${CREDS_FILE}" || \
 			( echo "A credentials file is required to run E2E tests, please re-run the make target with CREDS_FILE=<PathToCredentialsFile>"; exit 1 )
 		@[ "${BSL_BUCKET}" ] && echo "Using bucket ${BSL_BUCKET} to store backups from E2E tests" || \
 			(echo "Bucket to store the backups from E2E tests is required, please re-run with BSL_BUCKET=<BucketName>"; exit 1 )
 		@[ "${CLOUD_PROVIDER}" ] && echo "Using cloud provider ${CLOUD_PROVIDER}" || \
 			(echo "Cloud provider for target cloud/plugin provider is required, please rerun with CLOUD_PROVIDER=<aws,azure,kind,vsphere>"; exit 1)
-	@$(GINKGO) -v $(FOCUS_STR) $(SKIP_STR) . -- -velerocli=$(VELERO_CLI) \
+	@$(GINKGO) -v $(FOCUS_STR) $(SKIP_STR) ./e2e -- -velerocli=$(VELERO_CLI) \
+		-velero-image=$(VELERO_IMAGE) \
+		-plugins=$(PLUGINS) \
+		-velero-version=$(VERSION) \
+		-restore-helper-image=$(RESTORE_HELPER_IMAGE) \
+		-upgrade-from-velero-cli=$(UPGRADE_FROM_VELERO_CLI) \
+		-upgrade-from-velero-version=$(UPGRADE_FROM_VELERO_VERSION) \
+		-migrate-from-velero-cli=$(MIGRATE_FROM_VELERO_CLI) \
+		-migrate-from-velero-version=$(MIGRATE_FROM_VELERO_VERSION) \
+		-velero-namespace=$(VELERO_NAMESPACE) \
+		-credentials-file=$(CREDS_FILE) \
+		-bucket=$(BSL_BUCKET) \
+		-prefix=$(BSL_PREFIX) \
+		-bsl-config=$(BSL_CONFIG) \
+		-vsl-config=$(VSL_CONFIG) \
+		-cloud-provider=$(CLOUD_PROVIDER) \
+		-object-store-provider="$(OBJECT_STORE_PROVIDER)" \
+		-additional-bsl-plugins=$(ADDITIONAL_BSL_PLUGINS) \
+		-additional-bsl-object-store-provider="$(ADDITIONAL_OBJECT_STORE_PROVIDER)" \
+		-additional-bsl-credentials-file=$(ADDITIONAL_CREDS_FILE) \
+		-additional-bsl-bucket=$(ADDITIONAL_BSL_BUCKET) \
+		-additional-bsl-prefix=$(ADDITIONAL_BSL_PREFIX) \
+		-additional-bsl-config=$(ADDITIONAL_BSL_CONFIG) \
+		-features=$(FEATURES) \
+		-install-velero=$(INSTALL_VELERO) \
+		-registry-credential-file=$(REGISTRY_CREDENTIAL_FILE) \
+		-kibishii-directory=$(KIBISHII_DIRECTORY) \
+		-debug-e2e-test=$(DEBUG_E2E_TEST) \
+		-velero-server-debug-mode=$(VELERO_SERVER_DEBUG_MODE) \
+		-default-cluster-context=$(DEFAULT_CLUSTER) \
+		-standby-cluster-context=$(STANDBY_CLUSTER) \
+		-uploader-type=$(UPLOADER_TYPE) \
+		-snapshot-move-data=$(SNAPSHOT_MOVE_DATA) \
+		-data-mover-plugin=$(DATA_MOVER_PLUGIN) \
+		-standby-cluster-cloud-provider=$(STANDBY_CLUSTER_CLOUD_PROVIDER) \
+		-standby-cluster-plugins=$(STANDBY_CLUSTER_PLUGINS) \
+		-standby-cluster-object-store-provider=$(STANDBY_CLUSTER_OBJECT_STORE_PROVIDER) \
+		-debug-velero-pod-restart=$(DEBUG_VELERO_POD_RESTART) \
+		-disable-informer-cache=$(DISABLE_INFORMER_CACHE) \
+		-default-cluster-name=$(DEFAULT_CLUSTER_NAME) \
+		-standby-cluster-name=$(STANDBY_CLUSTER_NAME) \
+		-eks-policy-arn=$(EKS_POLICY_ARN) \
+		-default-cls-service-account-name=$(DEFAULT_CLS_SERVICE_ACCOUNT_NAME) \
+		-standby-cls-service-account-name=$(STANDBY_CLS_SERVICE_ACCOUNT_NAME)
+
+.PHONY: run-perf
+run-perf: ginkgo
+		@[ "${CREDS_FILE}" ] && echo "Using credentials from ${CREDS_FILE}" || \
+			( echo "A credentials file is required to run E2E tests, please re-run the make target with CREDS_FILE=<PathToCredentialsFile>"; exit 1 )
+		@[ "${BSL_BUCKET}" ] && echo "Using bucket ${BSL_BUCKET} to store backups from E2E tests" || \
+			(echo "Bucket to store the backups from E2E tests is required, please re-run with BSL_BUCKET=<BucketName>"; exit 1 )
+		@[ "${CLOUD_PROVIDER}" ] && echo "Using cloud provider ${CLOUD_PROVIDER}" || \
+			(echo "Cloud provider for target cloud/plugin provider is required, please rerun with CLOUD_PROVIDER=<aws,azure,kind,vsphere>"; exit 1)
+	@$(GINKGO) -v $(FOCUS_STR) $(SKIP_STR) ./perf -- -velerocli=$(VELERO_CLI) \
 		-velero-image=$(VELERO_IMAGE) \
 		-plugins=$(PLUGINS) \
 		-velero-version=$(VELERO_VERSION) \
@@ -138,7 +231,7 @@ run: ginkgo
 		-velero-pod-mem-limit=$(VELERO_POD_MEM_LIMIT) \
 		-velero-pod-cpu-request=$(VELERO_POD_CPU_REQUEST) \
 		-velero-pod-mem-request=$(VELERO_POD_MEM_REQUEST) \
-		-pod-volume-operation-timeout=$(POD_VOLUME_OPERATION_TIMEOUT)
+		-pod-volume-operation-timeout=$(POD_VOLUME_OPERATION_TIMEOUT) 
 
 build: ginkgo
 	mkdir -p $(OUTPUT_DIR)
